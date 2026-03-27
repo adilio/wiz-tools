@@ -129,6 +129,11 @@ select{background:var(--surface2);border:1px solid var(--border);border-radius:5
 .results-count span{color:var(--text-dim);}
 table{width:100%;border-collapse:separate;border-spacing:0 2px;}
 thead th{text-align:left;padding:6px 10px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;}
+thead th.sortable{cursor:pointer;user-select:none;}
+thead th.sortable:hover{color:var(--text-dim);}
+thead th.sort-active{color:var(--accent);}
+thead th .sort-arrow{display:inline-block;margin-left:3px;opacity:0.4;font-style:normal;}
+thead th.sort-active .sort-arrow{opacity:1;}
 tbody tr{background:var(--surface);cursor:pointer;transition:background 0.1s;}
 tbody tr:hover{background:var(--surface2);}
 tbody tr.expanded,tbody tr.gexpanded{background:var(--surface2);}
@@ -305,13 +310,6 @@ tr.expanded .chevron,tr.gexpanded .chevron{transform:rotate(90deg);color:var(--a
     <div id="sev-filters" style="display:flex;gap:4px;flex-wrap:wrap"></div>
     <span class="sort-label" style="margin-left:5px">Source:</span>
     <select id="source-filter"><option value="">All sources</option></select>
-    <span class="sort-label">Sort:</span>
-    <select id="sort-sel">
-      <option value="name">Issue name</option>
-      <option value="severity">Severity</option>
-      <option value="source">Source</option>
-      <option value="created">Created</option>
-    </select>
     <div class="ctrl-right">
       <div class="view-toggle">
         <button class="vbtn active" id="vbtn-flat" onclick="setView('flat')">
@@ -336,9 +334,14 @@ tr.expanded .chevron,tr.gexpanded .chevron{transform:rotate(90deg);color:var(--a
   <div class="table-wrap">
     <div class="results-count"><span id="vis-count">0</span> of <span id="tot-count">0</span> issues — click to expand</div>
     <table>
-      <thead><tr>
-        <th style="width:34%">Issue</th><th>Severity</th><th>Status</th>
-        <th>Source</th><th>Region</th><th>Created</th><th>Last Active</th>
+      <thead><tr id="thead-row">
+        <th class="sortable" data-sort="name" style="width:34%">Issue<i class="sort-arrow">↕</i></th>
+        <th class="sortable" data-sort="severity">Severity<i class="sort-arrow">↕</i></th>
+        <th>Status</th>
+        <th class="sortable" data-sort="source">Source<i class="sort-arrow">↕</i></th>
+        <th class="sortable" data-sort="region">Region<i class="sort-arrow">↕</i></th>
+        <th class="sortable" data-sort="created">Created<i class="sort-arrow">↕</i></th>
+        <th class="sortable" data-sort="lastactive">Last Active<i class="sort-arrow">↕</i></th>
       </tr></thead>
       <tbody id="tbody"></tbody>
     </table>
@@ -392,7 +395,7 @@ const KNOWN_GQ = {
 // ─── STATE ─────────────────────────────────────────────────────────────────
 let DATA=[], filtered=[], GQ={...KNOWN_GQ};
 let expIdx=null, expGrp=null, expSub=null;
-let sevFilt='all', srcFilt='', searchQ='', sortK='name', viewMode='flat';
+let sevFilt='all', srcFilt='', searchQ='', sortK='name', sortDir='asc', viewMode='flat';
 let isLight=true, fileName='', NOTES={};
 let ovOpen=false, pItems=[], pIdx=0;
 
@@ -483,10 +486,13 @@ function buildReport(){
 
   // Stat pills
   const cnt={};DATA.forEach(r=>{cnt[r.Severity]=(cnt[r.Severity]||0)+1;});
+  const themeIcon=document.getElementById('theme-icon')?document.getElementById('theme-icon').innerHTML:'';
+  const themeLbl=document.getElementById('theme-lbl')?document.getElementById('theme-lbl').textContent:(isLight?'Dark':'Light');
   document.getElementById('stat-pills').innerHTML=[
     `<div class="stat-pill total"><span class="num">${DATA.length}</span> issues</div>`,
     ...Object.entries(cnt).sort((a,b)=>(SEV_ORDER[a[0]]??9)-(SEV_ORDER[b[0]]??9))
-      .map(([s,n])=>`<div class="stat-pill ${s.toLowerCase()}"><div class="dot"></div><span class="num">${n}</span> ${s.toLowerCase()}</div>`)
+      .map(([s,n])=>`<div class="stat-pill ${s.toLowerCase()}"><div class="dot"></div><span class="num">${n}</span> ${s.toLowerCase()}</div>`),
+    `<button class="btn" onclick="toggleTheme()"><svg id="theme-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">${themeIcon}</svg><span id="theme-lbl">${themeLbl}</span></button>`
   ].join('');
 
   // Sev filters
@@ -507,7 +513,14 @@ function buildReport(){
   sel.innerHTML='<option value="">All sources</option>'+srcs.map(s=>`<option>${s}</option>`).join('');
   sel.onchange=e=>{srcFilt=e.target.value;syncCardActive();applyFilters();};
 
-  document.getElementById('sort-sel').onchange=e=>{sortK=e.target.value;applyFilters();};
+  document.querySelectorAll('#thead-row th.sortable').forEach(th=>{
+    th.addEventListener('click',()=>{
+      const k=th.dataset.sort;
+      if(sortK===k){sortDir=sortDir==='asc'?'desc':'asc';}else{sortK=k;sortDir='asc';}
+      updateSortHeaders();applyFilters();
+    });
+  });
+  updateSortHeaders();
   let st;
   document.getElementById('search').oninput=e=>{
     clearTimeout(st);st=setTimeout(()=>{searchQ=e.target.value;applyFilters();},180);
@@ -516,7 +529,7 @@ function buildReport(){
   buildOverview();
   document.getElementById('upload-screen').style.display='none';
   document.getElementById('report-screen').style.display='block';
-  sevFilt='all';srcFilt='';searchQ='';sortK='name';viewMode='flat';
+  sevFilt='all';srcFilt='';searchQ='';sortK='name';sortDir='asc';viewMode='flat';
   expIdx=null;expGrp=null;expSub=null;
   applyFilters();
 }
@@ -558,6 +571,15 @@ function toggleOv(){
   document.getElementById('ov-chev').classList.toggle('open',ovOpen);
 }
 
+// ─── SORT HEADERS ──────────────────────────────────────────────────────────
+function updateSortHeaders(){
+  document.querySelectorAll('#thead-row th.sortable').forEach(th=>{
+    const active=th.dataset.sort===sortK;
+    th.classList.toggle('sort-active',active);
+    th.querySelector('.sort-arrow').textContent=active?(sortDir==='asc'?'↑':'↓'):'↕';
+  });
+}
+
 // ─── FILTERS ───────────────────────────────────────────────────────────────
 function applyFilters(){
   filtered=DATA.filter(r=>{
@@ -567,11 +589,14 @@ function applyFilters(){
     return true;
   });
   filtered.sort((a,b)=>{
-    if(sortK==='name')return a.Name.localeCompare(b.Name);
-    if(sortK==='severity')return(SEV_ORDER[a.Severity]??9)-(SEV_ORDER[b.Severity]??9);
-    if(sortK==='source')return a.Source.localeCompare(b.Source);
-    if(sortK==='created')return a['Created At'].localeCompare(b['Created At']);
-    return 0;
+    let v=0;
+    if(sortK==='name')v=a.Name.localeCompare(b.Name);
+    else if(sortK==='severity')v=(SEV_ORDER[a.Severity]??9)-(SEV_ORDER[b.Severity]??9);
+    else if(sortK==='source')v=(a.Source||'').localeCompare(b.Source||'');
+    else if(sortK==='region')v=(a.Region||'').localeCompare(b.Region||'');
+    else if(sortK==='created')v=(a['Created At']||'').localeCompare(b['Created At']||'');
+    else if(sortK==='lastactive')v=(a['Last Active At']||'').localeCompare(b['Last Active At']||'');
+    return sortDir==='asc'?v:-v;
   });
   expIdx=null;expGrp=null;expSub=null;render();
 }
