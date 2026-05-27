@@ -95,21 +95,6 @@ function Write-Status {
     Write-Information "$time $prefix $Message" -InformationAction Continue
 }
 
-function Write-SummaryMetric {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$Label,
-
-        [Parameter(Mandatory)]
-        [object]$Value
-    )
-
-    $labelText = Format-ConsoleText ("  {0,-20}" -f $Label) $PSStyle.Foreground.BrightBlack
-    $valueText = Format-ConsoleText $Value.ToString() $PSStyle.Foreground.Green
-    Write-Information "$labelText $valueText" -InformationAction Continue
-}
-
 function Connect-RequiredGraph {
     [CmdletBinding()]
     param(
@@ -444,36 +429,23 @@ try {
     }
     Write-Progress -Activity "Scanning site drives" -Completed
 
-    $result = [PSCustomObject]@{
-        TenantId        = $appTenantId
-        TotalUsersFound = $licensedUserCount
-        TotalDrivesFound = $processedDriveIds.Count
-        SitesProcessed  = $siteCount
-        TemporaryApp    = $AppName
-        Elapsed         = Format-ElapsedTime ([datetime]::UtcNow - $script:RunStartedAt)
-    }
-
-    Write-Section "Final Counts"
-    Write-SummaryMetric -Label "Tenant ID" -Value $result.TenantId
-    Write-SummaryMetric -Label "Users Found" -Value $result.TotalUsersFound
-    Write-SummaryMetric -Label "Drives Found" -Value $result.TotalDrivesFound
-    Write-SummaryMetric -Label "Sites Processed" -Value $result.SitesProcessed
-    Write-SummaryMetric -Label "Elapsed" -Value $result.Elapsed
-    Write-Status -Level "DONE" -Message "Sizing scan complete."
-
-    $result
+    Write-Information "`n===================================" -InformationAction Continue
+    Write-Information "           FINAL COUNTS            " -InformationAction Continue
+    Write-Information "===================================" -InformationAction Continue
+    Write-Information " Total Users Found : $licensedUserCount" -InformationAction Continue
+    Write-Information " Total Drives Found: $($processedDriveIds.Count)" -InformationAction Continue
+    Write-Information "===================================" -InformationAction Continue
 }
 finally {
     if ($appObjectId -and -not $KeepTemporaryApp) {
-        Write-Section "Cleanup"
-        Write-Status -Level "INFO" -Message "Removing temporary app: $AppName"
+        Write-Information "`n[Cleanup] Removing temporary app ($AppName)..." -InformationAction Continue
 
         try {
             Remove-MgApplication -ApplicationId $appObjectId -ErrorAction Stop
-            Write-Status -Level "OK" -Message "Temporary app deleted successfully."
+            Write-Information "[Cleanup] App deleted successfully." -InformationAction Continue
         }
         catch {
-            Write-Warning "[Cleanup] Could not delete app automatically. Please remove '$AppName' manually from Azure Portal. Error: $($_.Exception.Message)"
+            Write-Warning "[Cleanup] Could not delete app automatically. Please remove '$AppName' manually from Azure Portal."
         }
     }
     elseif ($appObjectId -and $KeepTemporaryApp) {

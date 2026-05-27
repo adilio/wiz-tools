@@ -84,7 +84,7 @@ This version keeps the same high-level discovery workflow as the original Wiz Mi
 | Progress output | Minimal terminal output | Adds clean section headers, elapsed time, `Write-Progress`, and periodic status lines | Gives users confidence during long Cloud Shell runs |
 | Performance | Used PowerShell array appends with `+=` inside loops | Uses generic collections and hash sets | Avoids slow array copying in larger tenants |
 | Drive scan payload | Requested default drive fields | Uses `$select` for only needed drive fields | Reduces Microsoft Graph response size |
-| Final result | Printed counts only | Prints counts and emits a structured PowerShell object | Makes the script easier to automate or capture |
+| Final result | Printed the `FINAL COUNTS` block | Keeps the same `FINAL COUNTS` output format | Preserves compatibility with existing runbooks and customer instructions |
 
 ## Parameters
 
@@ -127,13 +127,15 @@ It also uses `Write-Progress` for Cloud Shell progress bars and periodic termina
 
 ## Results
 
-Results are printed to the terminal and emitted as a PowerShell object:
+Results are printed to the terminal using the same final output format as the original script:
 
 ```text
-Users Found
-Drives Found
-Sites Processed
-Elapsed
+===================================
+           FINAL COUNTS
+===================================
+ Total Users Found : <count>
+ Total Drives Found: <count>
+===================================
 ```
 
 ## Cleanup
