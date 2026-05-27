@@ -125,6 +125,20 @@ The script prints clean progress updates while it runs:
 
 It also uses `Write-Progress` for Cloud Shell progress bars and periodic terminal log lines so users can tell the scan is still moving during long runs.
 
+## Performance Notes
+
+This version includes several improvements over the original script for larger tenants:
+
+- Uses generic collections and hash sets instead of repeatedly growing PowerShell arrays with `+=`
+- Requests larger user pages with `$top=999` to reduce user-list pagination
+- Uses `$select` to limit Microsoft Graph responses to fields required for counting
+- Tracks token expiry and reacquires app-only access tokens before long scans expire
+- Honors Microsoft Graph `Retry-After` guidance when throttled
+
+The main remaining runtime cost is the drive scan: Microsoft Graph is queried once per site to list that site's drives. For tenants with many sites, that can mean thousands of drive-list requests.
+
+A possible future improvement is Microsoft Graph JSON batching, which can combine up to 20 site-drive requests into a single HTTP request. That could reduce network round trips, but it also makes retry handling more complex because individual requests inside a batch can be throttled independently.
+
 ## Results
 
 Results are printed to the terminal using the same final output format as the original script:

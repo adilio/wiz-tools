@@ -385,7 +385,7 @@ try {
     Write-Status -Level "SCAN" -Message "Collecting users, sites, and unique drives."
 
     $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
-    $allUsers = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/users?`$select=id,assignedLicenses" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching users" -ProgressInterval 1000
+    $allUsers = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/users?`$select=id,assignedLicenses&`$top=999" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching users" -ProgressInterval 1000
 
     $m365F1SkuId = "44575883-256e-4a79-9da4-ebe9acabe2b2"
     $licensedUserCount = 0
@@ -414,7 +414,7 @@ try {
         $siteIndex++
         $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
         $encodedSiteId = [uri]::EscapeDataString($site.id)
-        $drivesUri = "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/drives?`$select=id,name,driveType,webUrl"
+        $drivesUri = "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/drives?`$select=id,name"
         $drives = Invoke-GraphCollectionRequest -Uri $drivesUri -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching drives for site $siteIndex of $siteCount" -ProgressInterval 100
 
         foreach ($drive in $drives) {

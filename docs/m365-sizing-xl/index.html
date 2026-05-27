@@ -228,6 +228,20 @@ footer a:hover{color:var(--accent);}
 ===================================</code></pre>
       </section>
 
+      <section id="performance">
+        <h2>Performance Notes</h2>
+        <p>This version includes several improvements over the original script for larger tenants:</p>
+        <ul>
+          <li>Uses generic collections and hash sets instead of repeatedly growing PowerShell arrays with <code>+=</code></li>
+          <li>Requests larger user pages with <code>$top=999</code> to reduce user-list pagination</li>
+          <li>Uses <code>$select</code> to limit Microsoft Graph responses to fields required for counting</li>
+          <li>Tracks token expiry and reacquires app-only access tokens before long scans expire</li>
+          <li>Honors Microsoft Graph <code>Retry-After</code> guidance when throttled</li>
+        </ul>
+        <p>The main remaining runtime cost is the drive scan: Microsoft Graph is queried once per site to list that site's drives. For tenants with many sites, that can mean thousands of drive-list requests.</p>
+        <p>A possible future improvement is Microsoft Graph JSON batching, which can combine up to 20 site-drive requests into a single HTTP request. That could reduce network round trips, but it also makes retry handling more complex because individual requests inside a batch can be throttled independently.</p>
+      </section>
+
       <section id="notes">
         <h2>Notes</h2>
         <ul>
@@ -248,6 +262,7 @@ footer a:hover{color:var(--accent);}
       <a href="#changes">Differences</a>
       <a href="#parameters">Parameters</a>
       <a href="#output">Progress and results</a>
+      <a href="#performance">Performance notes</a>
       <a href="#notes">Notes</a>
     </aside>
   </main>
