@@ -10,6 +10,7 @@ A static catalog is published from the [`docs/`](docs/) directory:
 
 - [wiz-tools landing page](https://adilio.github.io/wiz-tools/)
 - [Wiz SHI Report Viewer](https://adilio.github.io/wiz-tools/wiz-shi-report-viewer/)
+- [Microsoft 365 Sizing Script](https://adilio.github.io/wiz-tools/m365-sizing-xl/)
 
 ## Tools
 
