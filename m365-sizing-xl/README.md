@@ -159,6 +159,8 @@ Results are printed to the terminal using the same final output format as the or
 ===================================
 ```
 
+If the scan fails after collecting some data, the script prints a separate `PARTIAL COUNTS BEFORE FAILURE` block before cleanup. Treat that output as incomplete and share the error details with your Wiz account team.
+
 ## Cleanup
 
 By default, the temporary Entra ID application is deleted in a `finally` block even if the scan fails.
@@ -169,4 +171,5 @@ If cleanup fails, the script prints the app name so it can be removed manually f
 
 - Large tenants can take more than an hour to scan. The script reacquires app-only Graph access tokens before they expire.
 - Microsoft Graph throttling is expected in large tenants. The script honors `Retry-After` when Graph returns it.
+- If Microsoft Graph returns `423 Locked` for an individual site drive listing, the script skips that site's drives and continues scanning the rest of the tenant.
 - Review the script before running it in production tenants.

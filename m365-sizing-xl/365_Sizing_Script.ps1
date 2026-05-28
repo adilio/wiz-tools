@@ -209,7 +209,9 @@ function Invoke-GraphCollectionRequest {
         [string]$Activity = "Microsoft Graph request",
 
         [ValidateRange(1, 100000)]
-        [int]$ProgressInterval = 500
+        [int]$ProgressInterval = 500,
+
+        [int[]]$NonFatalStatusCodes = @(404)
     )
 
     $headers = @{
@@ -258,7 +260,10 @@ function Invoke-GraphCollectionRequest {
                     $null
                 }
 
-                if ($statusCode -eq 404) {
+                if ($statusCode -in $NonFatalStatusCodes) {
+                    if ($statusCode -ne 404) {
+                        Write-Warning "$Activity skipped because Microsoft Graph returned status $statusCode. Continuing scan."
+                    }
                     return , $results
                 }
 
@@ -318,6 +323,11 @@ $redirectUri = "https://admin.microsoft.com"
 $appObjectId = $null
 $appClientId = $null
 $appSecret = $null
+$licensedUserCount = $null
+$processedDriveIds = [System.Collections.Generic.HashSet[string]]::new()
+$siteCount = $null
+$siteIndex = 0
+$scanCompleted = $false
 
 try {
     Write-Section "Wiz Microsoft 365 Sizing"
@@ -400,9 +410,7 @@ try {
     $allSites = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$select=id" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching sites" -ProgressInterval 500
     Write-Status -Level "OK" -Message "$($allSites.Count) sites found. Scanning drives next."
 
-    $processedDriveIds = [System.Collections.Generic.HashSet[string]]::new()
     $siteCount = $allSites.Count
-    $siteIndex = 0
     $lastSiteProgressUpdate = [datetime]::UtcNow
     $excludedDriveNames = [System.Collections.Generic.HashSet[string]]::new([string[]]@("PersonalCacheLibrary", "Preservation Hold Library"))
 
@@ -415,7 +423,7 @@ try {
         $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
         $encodedSiteId = [uri]::EscapeDataString($site.id)
         $drivesUri = "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/drives?`$select=id,name"
-        $drives = Invoke-GraphCollectionRequest -Uri $drivesUri -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching drives for site $siteIndex of $siteCount" -ProgressInterval 100
+        $drives = Invoke-GraphCollectionRequest -Uri $drivesUri -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching drives for site $siteIndex of $siteCount" -ProgressInterval 100 -NonFatalStatusCodes @(404, 423)
 
         foreach ($drive in $drives) {
             if ($excludedDriveNames.Contains($drive.name)) {
@@ -435,6 +443,35 @@ try {
     Write-Information " Total Users Found : $licensedUserCount" -InformationAction Continue
     Write-Information " Total Drives Found: $($processedDriveIds.Count)" -InformationAction Continue
     Write-Information "===================================" -InformationAction Continue
+    $scanCompleted = $true
+}
+catch {
+    if (-not $scanCompleted -and ($null -ne $licensedUserCount -or $processedDriveIds.Count -gt 0 -or $siteIndex -gt 0)) {
+        Write-Information "`n===================================" -InformationAction Continue
+        Write-Information "     PARTIAL COUNTS BEFORE FAILURE " -InformationAction Continue
+        Write-Information "===================================" -InformationAction Continue
+
+        if ($null -ne $licensedUserCount) {
+            Write-Information " Total Users Found       : $licensedUserCount" -InformationAction Continue
+        }
+        else {
+            Write-Information " Total Users Found       : Not completed" -InformationAction Continue
+        }
+
+        Write-Information " Total Drives Found So Far: $($processedDriveIds.Count)" -InformationAction Continue
+
+        if ($null -ne $siteCount) {
+            Write-Information " Sites Processed So Far  : $siteIndex / $siteCount" -InformationAction Continue
+        }
+        else {
+            Write-Information " Sites Processed So Far  : Not started" -InformationAction Continue
+        }
+
+        Write-Information "===================================" -InformationAction Continue
+        Write-Warning "The counts above are partial because the scan failed before completion."
+    }
+
+    throw
 }
 finally {
     if ($appObjectId -and -not $KeepTemporaryApp) {

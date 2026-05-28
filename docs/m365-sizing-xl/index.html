@@ -229,6 +229,7 @@ footer a:hover{color:var(--accent);}
  Total Users Found : &lt;count&gt;
  Total Drives Found: &lt;count&gt;
 ===================================</code></pre>
+        <p>If the scan fails after collecting some data, the script prints a separate <code>PARTIAL COUNTS BEFORE FAILURE</code> block before cleanup. Treat that output as incomplete and share the error details with your Wiz account team.</p>
       </section>
 
       <section id="performance">
@@ -250,6 +251,7 @@ footer a:hover{color:var(--accent);}
         <ul>
           <li>Large tenants can take more than an hour to scan. The script reacquires app-only Graph access tokens before they expire.</li>
           <li>Microsoft Graph throttling is expected in large tenants. The script honors <code>Retry-After</code> when Graph returns it.</li>
+          <li>If Microsoft Graph returns <code>423 Locked</code> for an individual site drive listing, the script skips that site's drives and continues scanning the rest of the tenant.</li>
           <li>Review the script before running it in production tenants.</li>
         </ul>
       </section>
