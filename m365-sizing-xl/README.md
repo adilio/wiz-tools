@@ -32,16 +32,23 @@ The temporary application is automatically removed when the script finishes.
 
 1. Log in to the Microsoft 365 Admin Portal.
 2. Open Azure Cloud Shell.
-3. Upload, clone, or download `365_Sizing_Script.ps1`.
-4. Run the script.
+3. Download only the sizing script and run it.
 
 ```powershell
+curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1
 ```
 
 The script uses device-code authentication by default, which works cleanly in Azure Cloud Shell.
 
 ## Download and Run
+
+Recommended Cloud Shell download from this repo:
+
+```powershell
+curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
+./365_Sizing_Script.ps1
+```
 
 If you are running the published Wiz-hosted version:
 
