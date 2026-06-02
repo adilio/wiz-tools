@@ -137,7 +137,7 @@ footer a:hover{color:var(--accent);}
           <li>Open Azure Cloud Shell.</li>
           <li>Download only the sizing script and run it.</li>
         </ol>
-        <pre><code>curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>The script uses device-code authentication by default, which works cleanly in Azure Cloud Shell.</p>
       </section>
@@ -145,10 +145,10 @@ footer a:hover{color:var(--accent);}
       <section id="download">
         <h2>Download and Run</h2>
         <p>Recommended Cloud Shell download from this repo:</p>
-        <pre><code>curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>If you are running the published Wiz-hosted version:</p>
-        <pre><code>curl -fLO http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1
+        <pre><code>Invoke-WebRequest -Uri http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>If you are running from this repo:</p>
         <pre><code>cd m365-sizing-xl

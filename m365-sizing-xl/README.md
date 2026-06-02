@@ -35,7 +35,7 @@ The temporary application is automatically removed when the script finishes.
 3. Download only the sizing script and run it.
 
 ```powershell
-curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1
 ```
 
@@ -46,14 +46,14 @@ The script uses device-code authentication by default, which works cleanly in Az
 Recommended Cloud Shell download from this repo:
 
 ```powershell
-curl -fLO https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1
 ```
 
 If you are running the published Wiz-hosted version:
 
 ```powershell
-curl -fLO http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1
+Invoke-WebRequest -Uri http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1
 ```
 
