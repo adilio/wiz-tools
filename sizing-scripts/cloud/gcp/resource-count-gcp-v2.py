@@ -224,6 +224,7 @@ padding = 6
 run_started_at = time.monotonic()
 projects_attempted = 0
 projects_completed = 0
+projects_failed = 0
 
 # Map command-line arguments to counts to execute and display.
 enabled = {
@@ -1101,6 +1102,8 @@ def output_results(projects, partial=False):
     print(f"\n{label} across {len(projects)} GCP Projects (script version: {version})\n")
     if partial:
         print(f"{projects_completed} projects completed; {projects_attempted} projects attempted before interruption or failure.\n")
+    if projects_failed:
+        print(f"{projects_failed} projects failed; review {errors_output_file} for details.\n")
 
     if enabled['Virtual Machines']:
         print(f"{str(totals_snapshot['Virtual Machines']).rjust(padding)} Virtual Machines [Compute Instances]")
@@ -1152,7 +1155,7 @@ def output_results(projects, partial=False):
 
 def main():
     """ Calculon Compute! """
-    global last_projects, projects_attempted, projects_completed  # pylint: disable=global-statement
+    global last_projects, projects_attempted, projects_completed, projects_failed  # pylint: disable=global-statement
     projects = []
 
     if args.inventory_instructions:
@@ -1202,10 +1205,14 @@ def main():
                 return
             projects_attempted += 1
             print(f"\nScanning {project_id} ({index}/{len(projects)}) ...")
-            get_gcp_resources(project_id, project_name)
-            projects_completed += 1
+            try:
+                get_gcp_resources(project_id, project_name)
+                projects_completed += 1
+            except Exception as ex:  # pylint: disable=broad-exception-caught
+                projects_failed += 1
+                error_print(ex, f"{project_id} project scan")
             last_projects = projects[:index]
-            if args.checkpoint_interval and projects_completed % args.checkpoint_interval == 0:
+            if args.checkpoint_interval and projects_completed and projects_completed % args.checkpoint_interval == 0:
                 output_results(last_projects, partial=True)
     except Exception:
         output_results(last_projects, partial=True)

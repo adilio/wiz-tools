@@ -26,6 +26,7 @@ The GCP script in this repo includes additional guardrails for very large `--all
 - Project IDs or names can be scoped with `--include-project-regex` and `--exclude-project-regex`.
 - Partial CSV output is written on interruption, bounded-run exit, and optional `--checkpoint-interval` checkpoints.
 - Output files can be directed to a run folder with `--output-dir`.
+- Project and resource failures are logged with context, and the scan continues with remaining projects and resource types where possible.
 - `--inventory-instructions` prints a Cloud Asset Inventory fallback outline.
 
 Examples:

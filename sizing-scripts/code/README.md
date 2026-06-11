@@ -21,6 +21,7 @@ The Azure DevOps script in this repo includes operational hardening for large or
 - Writes checkpoint and partial output on interruption.
 - Supports guardrails such as `--max-repositories`, `--max-commits-per-repo`, and `--max-run-minutes`.
 - Retries Azure DevOps API calls with `--max-retries` and `--retry-delay`.
+- Logs project/repository/API failures with context and continues scanning remaining repositories by default.
 
 Examples:
 
