@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wiz Sizing Scripts | wiz-tools</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#f5f6f8;--surface:#ffffff;--surface2:#eef0f4;--surface3:#e4e7ed;
+  --border:#dde0e8;--border-light:#c8ccd8;
+  --text:#0f172a;--text-dim:#475569;--text-muted:#94a3b8;
+  --accent:#325fe8;--accent-dim:rgba(50,95,232,0.08);--accent-glow:rgba(50,95,232,0.05);
+  --wiz-blue:#325fe8;--trans:0.18s ease;
+}
+:root.dark{
+  --bg:#0d0f14;--surface:#13161e;--surface2:#1a1e29;--surface3:#212536;
+  --border:#252a38;--border-light:#2e3447;
+  --text:#e2e6f0;--text-dim:#9aa3b7;--text-muted:#677089;
+  --accent:#5b8fff;--accent-dim:rgba(91,143,255,0.1);--accent-glow:rgba(91,143,255,0.05);
+  --wiz-blue:#5b8fff;
+}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:14px;line-height:1.65;min-height:100vh;transition:background var(--trans),color var(--trans);}
+.page{max-width:1080px;margin:0 auto;padding:40px 24px 72px;}
+header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:36px;gap:18px;}
+.wordmark{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;}
+.wordmark svg{width:28px;height:28px;flex-shrink:0;}
+.wordmark-text{font-size:20px;font-weight:700;letter-spacing:0;}
+.wordmark-text span{color:var(--wiz-blue);}
+.tagline{font-size:13px;color:var(--text-muted);margin-top:2px;font-family:'JetBrains Mono',monospace;}
+.top-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+.btn{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 11px;font-family:Inter,sans-serif;font-size:11px;color:var(--text-dim);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:border-color var(--trans),color var(--trans);}
+.btn:hover{color:var(--text);border-color:var(--border-light);}
+.hero{border-bottom:1px solid var(--border);padding-bottom:28px;margin-bottom:34px;}
+.eyebrow{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:10px;}
+h1{font-size:34px;line-height:1.15;font-weight:700;letter-spacing:0;margin-bottom:12px;}
+.lead{font-size:16px;color:var(--text-dim);max-width:760px;}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:18px;}
+.tag{font-size:10px;font-family:'JetBrains Mono',monospace;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:2px 7px;color:var(--text-muted);}
+main{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:34px;align-items:start;}
+.content{min-width:0;}
+.toc{position:sticky;top:22px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;}
+.toc-title{font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);font-weight:700;font-family:'JetBrains Mono',monospace;margin-bottom:10px;}
+.toc a{display:block;color:var(--text-dim);text-decoration:none;font-size:12px;padding:4px 0;}
+.toc a:hover{color:var(--accent);}
+section{margin-bottom:34px;}
+h2{font-size:20px;line-height:1.25;margin-bottom:12px;padding-top:4px;}
+h3{font-size:15px;line-height:1.3;margin:18px 0 8px;}
+p{color:var(--text-dim);margin-bottom:12px;}
+ul,ol{margin:0 0 14px 20px;color:var(--text-dim);}
+li{margin:4px 0;}
+a{color:var(--accent);}
+code{font-family:'JetBrains Mono',monospace;font-size:0.92em;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text);}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow:auto;margin:12px 0 16px;}
+pre code{background:transparent;border:0;padding:0;color:var(--text);font-size:12px;line-height:1.6;}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:12px 0 18px;display:table;}
+th,td{border-bottom:1px solid var(--border);padding:10px 12px;text-align:left;vertical-align:top;font-size:13px;}
+th{background:var(--surface2);font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
+tr:last-child td{border-bottom:0;}
+.callout{border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--surface);border-radius:8px;padding:14px 16px;margin:14px 0 18px;}
+.callout strong{color:var(--text);}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 18px;}
+.area{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;}
+.area-title{font-size:14px;font-weight:700;margin-bottom:6px;}
+.area p{font-size:13px;margin:0 0 12px;}
+.area a{font-size:12px;text-decoration:none;}
+footer{margin-top:48px;padding-top:24px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);}
+footer a{color:var(--text-muted);text-decoration:none;}
+footer a:hover{color:var(--accent);}
+@media (max-width:900px){
+  .page{padding:28px 18px 56px;}
+  header{flex-direction:column;}
+  .top-actions{justify-content:flex-start;}
+  h1{font-size:28px;}
+  main{display:block;}
+  .toc{position:static;margin-bottom:28px;}
+  .grid{grid-template-columns:1fr;}
+  table{display:block;overflow-x:auto;}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <a class="wordmark" href="../">
+        <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="28" height="28" rx="7" fill="var(--accent)"/>
+          <path d="M7 9l4 10 3-7 3 7 4-10" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="wordmark-text"><span>wiz</span>-tools</div>
+      </a>
+      <div class="tagline">community tools for working with Wiz</div>
+    </div>
+    <div class="top-actions">
+      <a class="btn" href="../">Back to tools</a>
+      <a class="btn" href="https://github.com/adilio/wiz-tools/tree/main/sizing-scripts" target="_blank">View source</a>
+      <button class="btn" onclick="toggleTheme()"><span id="theme-lbl">Dark</span></button>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="eyebrow">Code · Cloud · SaaS · Resource discovery</div>
+    <h1>Wiz Sizing Scripts</h1>
+    <p class="lead">Organized copies of Wiz resource-discovery and sizing scripts for estimating billable units before connectors are enabled. The scripts live in the repository; gists are kept as instruction pages.</p>
+    <div class="tags">
+      <span class="tag">sizing</span>
+      <span class="tag">resource discovery</span>
+      <span class="tag">python</span>
+      <span class="tag">powershell</span>
+    </div>
+  </div>
+
+  <main>
+    <article class="content">
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>The scripts estimate billable units before Wiz has live connector data. After a connector is enabled, the Wiz <strong>Settings &gt; Licenses</strong> page is the better source of truth.</p>
+        <div class="grid">
+          <div class="area">
+            <div class="area-title">Code</div>
+            <p>Counts active developers across VCS and CI/CD systems using commits and activity from the last 90 days.</p>
+            <a href="#code">View Code scripts</a>
+          </div>
+          <div class="area">
+            <div class="area-title">Cloud</div>
+            <p>Counts compute, data, registry, and infrastructure resources across cloud and infrastructure providers.</p>
+            <a href="#cloud">View Cloud scripts</a>
+          </div>
+          <div class="area">
+            <div class="area-title">SaaS</div>
+            <p>Holds SaaS-specific sizing scripts, including the hardened Microsoft 365 sizing script.</p>
+            <a href="#saas">View SaaS scripts</a>
+          </div>
+        </div>
+        <div class="callout"><strong>Privacy note:</strong> Some scripts create local output files with contributor or resource details. Review those files before sharing them.</div>
+      </section>
+
+      <section id="m365">
+        <h2>Microsoft 365 Canonical Path</h2>
+        <p>The Microsoft 365 sizing script is organized with the rest of the sizing scripts. Use this path for new runbooks and customer instructions.</p>
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
+./365_Sizing_Script.ps1</code></pre>
+        <p>The older published <code>m365-sizing-xl</code> URL is retained only as a compatibility documentation page for links that were already shared. It points to the same canonical script path above.</p>
+      </section>
+
+      <section id="code">
+        <h2>Code Scripts</h2>
+        <table>
+          <thead><tr><th>Platform</th><th>Status</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
+          <tbody>
+            <tr><td>Azure DevOps</td><td><code>modified</code></td><td><code>sizing-scripts/code/azure-devops/active-developer-count-ado.py</code></td><td><a href="https://gist.github.com/adilio/34bee443582f724a88a953f2b65e1695" target="_blank">Instructions</a></td></tr>
+            <tr><td>GitHub</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/github/active-developer-count-github.py</code></td><td><a href="https://gist.github.com/adilio/dcf9c6d8158f4bda24a5496e026bfa4d" target="_blank">Instructions</a></td></tr>
+            <tr><td>GitLab</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/gitlab/active-developer-count-gitlab.py</code></td><td><a href="https://gist.github.com/adilio/f2d0db7713f20fbec8e77b520d1ff0cf" target="_blank">Instructions</a></td></tr>
+            <tr><td>HCP Terraform</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/hcp-terraform/active-developer-count-hcp.py</code></td><td><a href="https://gist.github.com/adilio/172d8118782d96e4487ba7be70dd8cc0" target="_blank">Instructions</a></td></tr>
+          </tbody>
+        </table>
+        <h3>Typical Run</h3>
+        <pre><code>pip3 install --upgrade PyGithub
+python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
+        <p>If multiple VCS scripts run from the same directory, their output files can deduplicate contributors across systems.</p>
+      </section>
+
+      <section id="cloud">
+        <h2>Cloud Scripts</h2>
+        <table>
+          <thead><tr><th>Platform</th><th>Status</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
+          <tbody>
+            <tr><td>Alibaba Cloud</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/alibaba-cloud/resource-count-ali.py</code></td><td><a href="https://gist.github.com/adilio/1ed5885d2e2834556c9be9c6daa6ba99" target="_blank">Instructions</a></td></tr>
+            <tr><td>AWS</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/aws/resource-count-aws-v2.py</code></td><td><a href="https://gist.github.com/adilio/187c41935225d75100b5384eb814ec06" target="_blank">Instructions</a></td></tr>
+            <tr><td>AWS ASM</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/aws/asm-resource-count-aws.py</code></td><td><a href="https://gist.github.com/adilio/1e0bb1617cc4eec44906b463b931daf6" target="_blank">Instructions</a></td></tr>
+            <tr><td>Azure</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/azure/resource-count-azure-v2.py</code></td><td><a href="https://gist.github.com/adilio/e06c498f41bcc0ff4af76d1e0b3510cf" target="_blank">Instructions</a></td></tr>
+            <tr><td>GCP</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/gcp/resource-count-gcp-v2.py</code></td><td><a href="https://gist.github.com/adilio/f33a503a0d34d55441c2c87828bb5c66" target="_blank">Instructions</a></td></tr>
+            <tr><td>Linode</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/linode/resource-count-linode.py</code></td><td><a href="https://gist.github.com/adilio/8c4bc439955cff9533748bf9c0412080" target="_blank">Instructions</a></td></tr>
+            <tr><td>OCI</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/oci/resource-count-oci.py</code></td><td><a href="https://gist.github.com/adilio/0b8fe0449f3a0b76ed3291c7b9303b23" target="_blank">Instructions</a></td></tr>
+            <tr><td>Snowflake</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/snowflake/</code></td><td><a href="https://gist.github.com/adilio/7324ec1a7f59c211aae7593af977cc46" target="_blank">Instructions</a></td></tr>
+            <tr><td>VMware vSphere</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/vmware-vsphere/resource-count-vsphere.py</code></td><td><a href="https://gist.github.com/adilio/f846ba58dbe9d1497ca192d029d6c4f2" target="_blank">Instructions</a></td></tr>
+          </tbody>
+        </table>
+        <h3>Common Flags</h3>
+        <ul>
+          <li><code>--all</code> scans all accessible accounts, projects, or subscriptions where supported.</li>
+          <li><code>--data</code> includes buckets and databases where supported.</li>
+          <li><code>--images</code> includes registry container images where supported.</li>
+        </ul>
+      </section>
+
+      <section id="modified">
+        <h2>Modified Script Notes</h2>
+        <p>Scripts marked <code>modified</code> keep the original sizing intent, but include local hardening for field-reported runtime or reliability issues. The complete inventory is tracked in <code>sizing-scripts/SCRIPT_STATUS.md</code>.</p>
+
+        <h3>Microsoft 365 Sizing Script</h3>
+        <table>
+          <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
+          <tbody>
+            <tr><td>Temporary app lifecycle</td><td>Used a fixed temporary app name and cleaned up on the successful path</td><td>Creates a unique temporary Entra ID app by default and removes it from a <code>finally</code> block</td><td>Reduces risk of reusing or leaving behind the temporary app during failed runs</td></tr>
+            <tr><td>Cloud Shell sign-in</td><td>Used normal Microsoft Graph sign-in</td><td>Uses device-code authentication by default</td><td>Improves reliability in Azure Cloud Shell</td></tr>
+            <tr><td>Long-running scans</td><td>Used one app-only access token before scanning</td><td>Tracks expiry and refreshes app-only Graph tokens before they expire</td><td>Prevents large tenants from failing after an hour because the token expired</td></tr>
+            <tr><td>Graph calls</td><td>Retried throttling and API errors, then could stop without a clear final failure</td><td>Honors retry guidance and reports clear partial counts before cleanup if the scan fails</td><td>Prevents incomplete counts from looking like successful final results</td></tr>
+            <tr><td>Output compatibility</td><td>Printed the original <code>FINAL COUNTS</code> block</td><td>Keeps the same final block while adding elapsed progress and status lines</td><td>Preserves existing runbooks while making long runs easier to monitor</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Azure DevOps Active Developer Count</h3>
+        <table>
+          <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
+          <tbody>
+            <tr><td>Repository loop</td><td>Accumulated repositories across projects and then looped over the full accumulated list for each project</td><td>Scans only the repositories returned for the current project</td><td>Prevents repeated rescans that can make large organizations look like they are running indefinitely</td></tr>
+            <tr><td>Project and commit retrieval</td><td>Requested projects and commits without explicit operator-visible paging controls</td><td>Adds paged project retrieval and paged commit retrieval with <code>--project-page-size</code> and <code>--commit-page-size</code></td><td>Improves behavior in large organizations and repositories while making API work more visible</td></tr>
+            <tr><td>Runtime visibility</td><td>Printed repository and developer discoveries but no elapsed progress cadence</td><td>Adds elapsed status lines and <code>--progress-interval</code></td><td>Helps operators distinguish slow progress from a hung scan</td></tr>
+            <tr><td>Guardrails</td><td>No built-in cap for repositories, commits, or wall-clock runtime during troubleshooting</td><td>Adds <code>--max-repositories</code>, <code>--max-commits-per-repo</code>, and <code>--max-run-minutes</code></td><td>Allows safe pilots before committing to a full organization scan</td></tr>
+            <tr><td>Interruption and checkpoints</td><td>Ctrl-C exited without writing partial results</td><td>Writes partial outputs before exit; optional checkpoint outputs are available with <code>--checkpoint-interval</code></td><td>Preserves useful counts from long-running scans without changing normal-run output too much</td></tr>
+            <tr><td>API reliability</td><td>API errors were logged or skipped without retry/backoff controls</td><td>Adds <code>--max-retries</code>, <code>--retry-delay</code>, and <code>--fail-fast</code></td><td>Handles transient Azure DevOps failures while preserving a strict troubleshooting mode</td></tr>
+            <tr><td>Privacy option</td><td>Developer email addresses were printed to the terminal</td><td>Keeps that default for compatibility; <code>--mask-emails</code> opts into terminal masking</td><td>Preserves familiar output while adding a safer screen-share mode</td></tr>
+          </tbody>
+        </table>
+
+        <h3>GCP Resource Count</h3>
+        <table>
+          <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
+          <tbody>
+            <tr><td>Data workload default</td><td>Data counters were enabled internally even when <code>--data</code> was not supplied</td><td>Data buckets, PaaS databases, data warehouses, and non-OS disks now require <code>--data</code></td><td>Aligns runtime behavior with documented flags and shortens default discovery</td></tr>
+            <tr><td>Project scope</td><td><code>--all</code> scanned every accessible project</td><td>Adds <code>--max-projects</code>, <code>--include-project-regex</code>, and <code>--exclude-project-regex</code></td><td>Lets operators pilot or exclude noisy project families such as Apps Script-associated projects</td></tr>
+            <tr><td>Resume behavior</td><td>Long scans had to restart from the beginning after interruption</td><td>Adds <code>--start-after-project</code> for sorted project lists</td><td>Supports practical continuation after the last completed project</td></tr>
+            <tr><td>API guardrails</td><td>Paginated API calls could continue until the service finished or failed</td><td>Adds <code>--request-timeout</code>, <code>--max-pages-per-request</code>, and <code>--max-run-minutes</code></td><td>Bounds problematic calls and records partial data rather than silently running for many hours</td></tr>
+            <tr><td>Partial output</td><td>CSV output was written after the full scan</td><td>Writes partial CSV output on interruption, bounded-run exit, and optional <code>--checkpoint-interval</code> checkpoints</td><td>Preserves useful inventory from long scans that crash or are stopped without changing normal-run output too much</td></tr>
+            <tr><td>Alternative collection</td><td>No explicit fallback path for customers unable to run a full scan</td><td>Adds <code>--inventory-instructions</code> with Cloud Asset Inventory guidance</td><td>Gives customers a lower-friction way to provide counts when API scanning is too expensive</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="saas">
+        <h2>SaaS Scripts</h2>
+        <table>
+          <thead><tr><th>Platform</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
+          <tbody>
+            <tr><td>Microsoft 365</td><td><code>sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1</code></td><td><a href="https://gist.github.com/adilio/d8b512f809d4b872fd1b7dc17570f849" target="_blank">Instructions</a></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="repo-layout">
+        <h2>Repository Layout</h2>
+        <pre><code>sizing-scripts/
+├── cloud/
+├── code/
+└── saas/
+    └── microsoft-365/
+        └── 365_Sizing_Script.ps1</code></pre>
+        <p>Published HTML stays under the root <code>docs</code> folder for GitHub Pages. Script origin and modification status is tracked in <code>sizing-scripts/SCRIPT_STATUS.md</code>.</p>
+      </section>
+    </article>
+
+    <aside class="toc">
+      <div class="toc-title">On This Page</div>
+      <a href="#overview">Overview</a>
+      <a href="#m365">Microsoft 365</a>
+      <a href="#code">Code scripts</a>
+      <a href="#cloud">Cloud scripts</a>
+      <a href="#modified">Modified scripts</a>
+      <a href="#saas">SaaS scripts</a>
+      <a href="#repo-layout">Repo layout</a>
+    </aside>
+  </main>
+
+  <footer>
+    <span>Built while working with <a href="https://www.wiz.io" target="_blank">Wiz</a>. Shared in case it helps.</span>
+    <a href="https://github.com/adilio/wiz-tools" target="_blank">GitHub</a>
+  </footer>
+</div>
+
+<script>
+let isLight=true;
+function toggleTheme(){
+  isLight=!isLight;
+  document.documentElement.classList.toggle('dark',!isLight);
+  document.getElementById('theme-lbl').textContent=isLight?'Dark':'Light';
+}
+</script>
+</body>
+</html>

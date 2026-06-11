@@ -1,6 +1,11 @@
 #Requires -Version 7.0
 #Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Identity.DirectoryManagement
 
+# Local status: modified from the Wiz-hosted Microsoft 365 sizing script.
+# Origin: http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1
+# Local changes: unique temporary app names, cleanup in finally, token refresh,
+# retry handling, progress output, and Cloud Shell-friendly authentication.
+
 [CmdletBinding()]
 param(
     [string]$AppName = "Wiz-M365-Temp-Scanner-$([guid]::NewGuid().ToString('N').Substring(0, 8))",

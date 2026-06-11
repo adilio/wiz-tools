@@ -10,21 +10,23 @@ A static catalog is published from the [`docs/`](docs/) directory:
 
 - [wiz-tools landing page](https://adilio.github.io/wiz-tools/)
 - [Wiz SHI Report Viewer](https://adilio.github.io/wiz-tools/wiz-shi-report-viewer/)
-- [Microsoft 365 Sizing Script](https://adilio.github.io/wiz-tools/m365-sizing-xl/)
+- [Wiz Sizing Scripts](https://adilio.github.io/wiz-tools/sizing-scripts/) including Microsoft 365, Azure DevOps, GCP, and other sizing scripts
+- [Legacy Microsoft 365 Sizing Script page](https://adilio.github.io/wiz-tools/m365-sizing-xl/) kept for older shared links
 
 ## Tools
 
 | Tool | Purpose | How to run |
 |---|---|---|
 | [Wiz SHI Report Viewer](wiz-shi-report-viewer/) | Turn Wiz security issue CSV exports into an interactive report viewer. | Open `wiz-shi-report-viewer/wiz-shi-report-viewer.html` in a browser. |
-| [Microsoft 365 Sizing Script](m365-sizing-xl/) | Estimate Wiz billable units for Microsoft 365 SaaS users and virtual drives. | Run `m365-sizing-xl/365_Sizing_Script.ps1` from Azure Cloud Shell. |
+| [Microsoft 365 Sizing Script](sizing-scripts/saas/microsoft-365/) | Estimate Wiz billable units for Microsoft 365 SaaS users and virtual drives. | Run `sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1` from Azure Cloud Shell. |
+| [Wiz Sizing Scripts](sizing-scripts/) | Organized copies of Wiz Code, Cloud, SaaS, and infrastructure resource-discovery scripts. | Browse the relevant provider folder and run that script's documented command. |
 
 ## Repository Layout
 
 ```text
 .
 ├── docs/                    # GitHub Pages/static published versions
-├── m365-sizing-xl/           # Microsoft 365 sizing and discovery scripts
+├── sizing-scripts/           # Organized Code, Cloud, and SaaS sizing scripts
 ├── wiz-shi-report-viewer/    # Single-file Wiz security issue report viewer
 ├── LICENSE
 └── README.md
@@ -47,13 +49,13 @@ Then upload a Wiz security issue CSV export.
 The script is optimized for Azure Cloud Shell.
 
 ```powershell
-cd m365-sizing-xl
+cd sizing-scripts/saas/microsoft-365
 ./365_Sizing_Script.ps1
 ```
 
 The script creates a temporary Entra ID application, requests Microsoft Graph permissions, scans Microsoft 365 users and drives, prints final counts, and removes the temporary application when it finishes.
 
-See [m365-sizing-xl/README.md](m365-sizing-xl/README.md) for prerequisites, Cloud Shell instructions, and operational notes.
+See [sizing-scripts/saas/microsoft-365/README.md](sizing-scripts/saas/microsoft-365/README.md) for the canonical script location.
 
 ## Notes
 

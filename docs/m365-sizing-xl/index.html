@@ -88,7 +88,7 @@ footer a:hover{color:var(--accent);}
     </div>
     <div class="top-actions">
       <a class="btn" href="../">Back to tools</a>
-      <a class="btn" href="https://github.com/adilio/wiz-tools/tree/main/m365-sizing-xl" target="_blank">View source</a>
+      <a class="btn" href="https://github.com/adilio/wiz-tools/tree/main/sizing-scripts/saas/microsoft-365" target="_blank">View source</a>
       <button class="btn" onclick="toggleTheme()"><span id="theme-lbl">Dark</span></button>
     </div>
   </header>
@@ -107,6 +107,13 @@ footer a:hover{color:var(--accent);}
 
   <main>
     <article class="content">
+      <section id="canonical">
+        <h2>Canonical Location</h2>
+        <div class="callout"><strong>Note:</strong> This published URL is kept for older shared links. The script itself now lives with the rest of the sizing scripts at <code>sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1</code>.</div>
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
+./365_Sizing_Script.ps1</code></pre>
+      </section>
+
       <section id="counts">
         <h2>What It Counts</h2>
         <ul>
@@ -137,7 +144,7 @@ footer a:hover{color:var(--accent);}
           <li>Open Azure Cloud Shell.</li>
           <li>Download only the sizing script and run it.</li>
         </ol>
-        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>The script uses device-code authentication by default, which works cleanly in Azure Cloud Shell.</p>
       </section>
@@ -145,13 +152,13 @@ footer a:hover{color:var(--accent);}
       <section id="download">
         <h2>Download and Run</h2>
         <p>Recommended Cloud Shell download from this repo:</p>
-        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/m365-sizing-xl/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
+        <pre><code>Invoke-WebRequest -Uri https://raw.githubusercontent.com/adilio/wiz-tools/main/sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>If you are running the published Wiz-hosted version:</p>
         <pre><code>Invoke-WebRequest -Uri http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1 -OutFile 365_Sizing_Script.ps1
 ./365_Sizing_Script.ps1</code></pre>
         <p>If you are running from this repo:</p>
-        <pre><code>cd m365-sizing-xl
+        <pre><code>cd sizing-scripts/saas/microsoft-365
 ./365_Sizing_Script.ps1</code></pre>
       </section>
 
@@ -259,6 +266,7 @@ footer a:hover{color:var(--accent);}
 
     <aside class="toc">
       <div class="toc-title">On This Page</div>
+      <a href="#canonical">Canonical location</a>
       <a href="#counts">What it counts</a>
       <a href="#prerequisites">Prerequisites</a>
       <a href="#cloud-shell">Run from Cloud Shell</a>
