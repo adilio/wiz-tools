@@ -251,12 +251,19 @@ def verbose_print(details):
         print(f"\nDEBUG: {details}")
 
 
-def error_print(details):
+def error_print(details, context=''):
     """ Error output """
-    print(f"\nERROR: {details}")
-    errors_log.append(str(details).replace("\n", " ").replace("\r", " "))
+    context = f"{context}: " if context else ""
+    try:
+        error_type = type(details).__name__
+        details = str(details).replace("\n", " ").replace("\r", " ")
+    except Exception:  # pylint: disable=broad-exception-caught
+        error_type = 'Error'
+    message = f"+{elapsed_time()} ERROR: {context}{error_type}: {details}"
+    print(f"\n{message}")
+    errors_log.append(message)
     if args.fail_fast:
-        raise RuntimeError(details)
+        raise RuntimeError(f"{context}{details}")
 
 
 def elapsed_time():
@@ -387,7 +394,7 @@ def call_ado_api(description, func, *func_args, **func_kwargs):
             return func(*func_args, **func_kwargs)
         except Exception as ex:  # pylint: disable=broad-exception-caught
             if attempt >= args.max_retries:
-                error_print(f"{description} failed after {attempt} attempt(s): {ex}")
+                error_print(ex, f"{description} failed after {attempt} attempt(s)")
                 return None
             sleep_seconds = args.retry_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
             status_print(f"[WAIT] {description} failed on attempt {attempt}/{args.max_retries}. Retrying in {sleep_seconds:.1f}s.")
@@ -429,8 +436,7 @@ def get_projects(ado_client):
                 break
             skip += args.project_page_size
     except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex)
-        error_print("Unable to get Projects.")
+        error_print(ex, "Unable to get Projects")
     return result
 
 
@@ -445,8 +451,7 @@ def get_repositories(git_client, project):
             project=project.id
         ) or []
     except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex)
-        error_print(f"Unable to get Repositories in Project: {project.name}")
+        error_print(ex, f"Unable to get Repositories in Project: {project.name}")
     return result
 
 
@@ -491,8 +496,7 @@ def iter_commits(git_client, project, repository, repository_scan_state):
                 break
             skip += args.commit_page_size
     except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex)
-        error_print(f"Unable to get Commits in Repository: {repository.name}")
+        error_print(ex, f"Unable to get Commits in Repository: {project.name}/{repository.name}")
         repository_scan_state['failed'] = True
 
 
@@ -684,7 +688,7 @@ def main():
                 get_active_developers(git_client, project, repository)
             except Exception as ex:  # pylint: disable=broad-exception-caught
                 scan_stats['repositories_failed'] += 1
-                error_print(f"Repository scan failed: {project.name}/{repository.name}: {ex}")
+                error_print(ex, f"Repository scan failed: {project.name}/{repository.name}")
                 developers_per_repo.append([get_org_display_name(), project.name, repository.name, 0, 0, 'failed'])
             if args.checkpoint_interval and repositories_scanned % args.checkpoint_interval == 0:
                 output_results(projects, repositories, partial=True)

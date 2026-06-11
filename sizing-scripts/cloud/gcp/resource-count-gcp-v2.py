@@ -332,12 +332,14 @@ def error_print(details, project = ''):
     except Exception:  # pylint: disable=broad-exception-caught
         function = ''
     try:
+        error_type = type(details).__name__
         details = str(details).replace("\n", " ").replace("\r", " ")
     except Exception:  # pylint: disable=broad-exception-caught
-        pass
-    print(f"\nERROR: {project}{function} {details}\n")
+        error_type = 'Error'
+    message = f"+{elapsed_time()} ERROR: {project}{function} {error_type}: {details}"
+    print(f"\n{message}\n")
     with log_lock:
-        errors_log.append(f"ERROR: {project}{function} {details}")
+        errors_log.append(message)
 
 
 def add_total(resource_type, resource_count):
@@ -819,7 +821,7 @@ def get_gcp_gcr_images(project_id, project_name, region):
                     f'Artifact Registry docker images list for {repository}'
                 )
             except Exception as ex:  # pylint: disable=broad-exception-caught
-                error_print(ex, project_id)
+                error_print(ex, f"{project_id} region={region} repository={repository}")
                 continue
             for image in docker_images:
                 verbose_print(f"image: {image}")
@@ -1027,39 +1029,39 @@ def get_gcp_resources(project_id, project_name):
                 for region in regions_list:
                     get_gcp_gcr_images(project_id=project_id, project_name=project_name, region=region)
     else:
-        futures = []
+        futures = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             if enabled['Virtual Machines'] or enabled['Container Hosts']:
                 if 'compute.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gce_instances_and_gke_instances, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gce_instances_and_gke_instances, project_id=project_id, project_name=project_name)] = 'Compute instances and GKE nodes'
             if enabled['Container Hosts'] or enabled['Serverless Containers']:
                 if 'container.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_gke_clusters, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_gke_clusters, project_id=project_id, project_name=project_name)] = 'GKE clusters'
             if enabled['Serverless Functions']:
                 if 'cloudfunctions.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_cloud_functions, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_cloud_functions, project_id=project_id, project_name=project_name)] = 'Cloud Functions'
             if enabled['Serverless Containers']:
                 if 'run.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_cloudrun_revisions, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_cloudrun_revisions, project_id=project_id, project_name=project_name)] = 'Cloud Run revisions'
             if enabled['Data Buckets']:
                 if 'storage.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_buckets, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_buckets, project_id=project_id, project_name=project_name)] = 'Storage buckets'
             if enabled['PaaS Databases']:
                 if 'sqladmin.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_cloudsql_instances, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_cloudsql_instances, project_id=project_id, project_name=project_name)] = 'Cloud SQL instances'
                 if 'spanner.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_spanner_instances, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_spanner_instances, project_id=project_id, project_name=project_name)] = 'Spanner instances and databases'
             if enabled['Data Warehouses']:
                 if 'bigquery.googleapis.com' in service_list:
-                    futures.append(executor.submit(get_gcp_bigquery_datasets, project_id=project_id, project_name=project_name))
+                    futures[executor.submit(get_gcp_bigquery_datasets, project_id=project_id, project_name=project_name)] = 'BigQuery datasets'
             if enabled['Registry Container Images']:
                 if 'artifactregistry.googleapis.com' in service_list:
                     for region in regions_list:
-                        futures.append(executor.submit(get_gcp_gcr_images, project_id=project_id, project_name=project_name, region=region))
+                        futures[executor.submit(get_gcp_gcr_images, project_id=project_id, project_name=project_name, region=region)] = f'Artifact Registry images region={region}'
             for future in concurrent.futures.as_completed(futures):
                 if future.exception():
                     exceptions += 1
-                    error_print(future.exception(), project_id)
+                    error_print(future.exception(), f"{project_id} task={futures[future]}")
     status_print(f"[DONE] Project complete: {project_id} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {exceptions} exception(s))")
 
 
