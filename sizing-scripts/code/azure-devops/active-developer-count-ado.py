@@ -706,3 +706,6 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         signal_handler(None, None)
+    except Exception:  # pylint: disable=broad-exception-caught
+        output_results(last_projects, last_repositories, partial=True)
+        raise

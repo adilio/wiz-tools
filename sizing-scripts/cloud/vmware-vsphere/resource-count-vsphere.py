@@ -102,9 +102,7 @@ if not args.server:
 if not args.username:
     print("\nerror: the following arguments are required: --username")
     sys.exit(0)
-if not args.cluster:
-    print("\nerror: the following arguments are required: --cluster")
-    sys.exit(0)
+# --cluster is optional; omitting it scans the entire vCenter.
 if not args.password:
     args.password = getpass.getpass(prompt='Enter vSphere Password')
 if args.max_workers < 1 or args.max_workers > 255:
@@ -283,14 +281,14 @@ def output_results():
             csv_writer.writerow([resource_type, resource_count])
 
     # Log File
-    #with open(output_file_log, 'w', encoding='utf-8') as csv_file:
-    #    csv_writer = csv.writer(csv_file)
-    #    csv_writer.writerow(['Resource Type', 'Resource Count'])
-    #    for item in totals_log:
-    #        csv_writer.writerow(item)
+    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['Resource Type', 'Resource Count'])
+        for item in totals_log:
+            csv_writer.writerow(item)
 
     # Summary
-    print("\nResults (script version: {version})\n")
+    print(f"\nResults (script version: {version})\n")
 
     print(f"{str(totals['Asset Metadata']).rjust(padding)} Asset Metadata [Hosts, Virtual Machines]")
 

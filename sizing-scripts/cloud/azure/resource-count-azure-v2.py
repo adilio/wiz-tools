@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -219,6 +220,13 @@ totals = {
 
 totals_log = []
 errors_log = []
+totals_lock = threading.Lock()
+log_lock = threading.Lock()
+
+
+def add_total(key, value):
+    with totals_lock:
+        totals[key] += value
 
 try:
     if args.china_mode:
@@ -264,7 +272,8 @@ def progress_print(resource_count, resource_type, subscription='', details=''):
     rc = str(resource_count).rjust(padding)
     # Split and join to remove multiple spaces when variables are empty.
     print(' '.join(f"- {rc} {resource_type} in {subscription} {details}".split()))
-    totals_log.append([resource_type, resource_count, subscription])
+    with log_lock:
+        totals_log.append([resource_type, resource_count, subscription])
 
 
 def verbose_print(details):
@@ -285,7 +294,8 @@ def error_print(details, subscription = ''):
     except Exception:  # pylint: disable=broad-exception-caught
         pass
     print(f"\nERROR: {subscription}{function} {details}\n")
-    errors_log.append(f"ERROR: {subscription}{function} {details}")
+    with log_lock:
+        errors_log.append(f"ERROR: {subscription}{function} {details}")
 
 
 ####
@@ -459,8 +469,8 @@ def get_azure_vms(subscription):
         non_os_disks_count = result[0]['sum_non_os_disks_count']
         if virtual_machines_count > 0 or args.verbose_mode:
             progress_print(resource_count=virtual_machines_count, resource_type='Virtual Machines [Compute]', subscription=subscription.display_name, details=f"with {non_os_disks_count} Non-OS Disks")
-            totals['Virtual Machines'] += virtual_machines_count
-            totals['Non-OS Disks'] += non_os_disks_count
+            add_total('Virtual Machines', virtual_machines_count)
+            add_total('Non-OS Disks', non_os_disks_count)
         return
 
     try:
@@ -485,9 +495,9 @@ def get_azure_vms(subscription):
 
     if virtual_machines_count > 0 or args.verbose_mode:
         progress_print(resource_count=virtual_machines_count, resource_type='Virtual Machines [Compute]', subscription=subscription.display_name, details=f"with {non_os_disks_count} Non-OS Disks")
-        totals['Virtual Machines'] += virtual_machines_count
-        totals['Non-OS Disks'] += non_os_disks_count
-        totals['Virtual Machine Sensors'] += linux_instances_count
+        add_total('Virtual Machines', virtual_machines_count)
+        add_total('Non-OS Disks', non_os_disks_count)
+        add_total('Virtual Machine Sensors', linux_instances_count)
 
 
 # Virtual Machines: Scale Set VMs (Add Graph Mode Query)
@@ -500,6 +510,7 @@ def get_azure_vms_scale_sets(subscription):
     non_os_disks_count = 0
     linux_instances_count = 0
 
+    scale_sets = []
     try:
         compute_management_client = ComputeManagementClient(azure_credential, subscription.subscription_id, base_url=azure_base_url, credential_scopes=azure_credential_scopes)
         scale_sets = compute_management_client.virtual_machine_scale_sets.list_all()
@@ -548,9 +559,9 @@ def get_azure_vms_scale_sets(subscription):
 
     if virtual_machines_count > 0 or args.verbose_mode:
         progress_print(resource_count=virtual_machines_count, resource_type='Virtual Machines [Scale Sets]', subscription=subscription.display_name, details=f"with {non_os_disks_count} Non-OS Disks")
-        totals['Virtual Machines'] += virtual_machines_count
-        totals['Non-OS Disks'] += non_os_disks_count
-        totals['Virtual Machine Sensors'] += linux_instances_count
+        add_total('Virtual Machines', virtual_machines_count)
+        add_total('Non-OS Disks', non_os_disks_count)
+        add_total('Virtual Machine Sensors', linux_instances_count)
 
 
 # Container Hosts: AKS
@@ -565,15 +576,16 @@ def get_azure_aks_container_instances(subscription):
         query = """
         resources
         | where type == "microsoft.containerservice/managedclusters"
-        | project aks_instances_count = iff(isnotempty(properties.agentPoolProfiles[0]), properties.agentPoolProfiles[0].["count"], 0)
-        | summarize sum(aks_instances_count)
+        | mv-expand pool = properties.agentPoolProfiles
+        | summarize aks_instances_count = sum(toint(pool["count"]))
+        | project sum_aks_instances_count = aks_instances_count
         """
         result = query_azure_resource_graph(subscription, query)
         aks_instances_count = result[0]['sum_aks_instances_count']
         if aks_instances_count > 0 or args.verbose_mode:
             progress_print(resource_count=aks_instances_count, resource_type='Container Hosts [AKS]', subscription=subscription.display_name)
-            totals['Container Hosts'] += aks_instances_count
-            totals['Kubernetes Sensors'] += aks_instances_count
+            add_total('Container Hosts', aks_instances_count)
+            add_total('Kubernetes Sensors', aks_instances_count)
         return
 
     try:
@@ -584,12 +596,13 @@ def get_azure_aks_container_instances(subscription):
     # Loop through the ItemPaged response.
     for managed_cluster in managed_clusters:
         verbose_print(f"managed_cluster: {managed_cluster}")
-        aks_instances_count += managed_cluster.agent_pool_profiles[0].count
+        for pool in (managed_cluster.agent_pool_profiles or []):
+            aks_instances_count += pool.count or 0
 
     if aks_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=aks_instances_count, resource_type='Container Hosts', subscription=subscription.display_name)
-        totals['Container Hosts'] += aks_instances_count
-        totals['Kubernetes Sensors'] += aks_instances_count
+        add_total('Container Hosts', aks_instances_count)
+        add_total('Kubernetes Sensors', aks_instances_count)
 
 
 # Serverless Containers: Azure Container Instances (ACI)
@@ -612,7 +625,7 @@ def get_azure_container_instances(subscription):
 
     if container_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=container_instances_count, resource_type='Serverless Containers [Azure Container Instances]', subscription=subscription.display_name)
-        totals['Serverless Containers'] += container_instances_count
+        add_total('Serverless Containers', container_instances_count)
 
 
 # Serverless Containers: Azure Container Apps
@@ -635,8 +648,8 @@ def get_azure_container_apps(subscription):
 
     if container_apps_count > 0 or args.verbose_mode:
         progress_print(resource_count=container_apps_count, resource_type='Serverless Containers [Azure Container Apps]', subscription=subscription.display_name)
-        totals['Serverless Containers'] += container_apps_count
-        totals['Serverless Container Sensors'] += container_apps_count
+        add_total('Serverless Containers', container_apps_count)
+        add_total('Serverless Container Sensors', container_apps_count)
 
 
 # Serverless Functions: Web Apps
@@ -664,7 +677,7 @@ def get_azure_functions_web_apps(subscription):
         serverless_functions_count += result[0]['count_']
         if serverless_functions_count > 0 or args.verbose_mode:
             progress_print(resource_count=serverless_functions_count, resource_type='Serverless Functions [Web Apps]', subscription=subscription.display_name)
-            totals['Serverless Functions'] += serverless_functions_count
+            add_total('Serverless Functions', serverless_functions_count)
         return
 
     try:
@@ -687,7 +700,7 @@ def get_azure_functions_web_apps(subscription):
 
     if serverless_functions_count > 0 or args.verbose_mode:
         progress_print(resource_count=serverless_functions_count, resource_type='Serverless Functions [Web Apps]', subscription=subscription.display_name)
-        totals['Serverless Functions'] += serverless_functions_count
+        add_total('Serverless Functions', serverless_functions_count)
 
 
 # Serverless Functions: App Service Plans (Disabled: Double counts Web Apps)
@@ -708,7 +721,7 @@ def get_azure_functions_web_apps_app_service_plans(subscription):
         serverless_functions_count = result[0]['count_']
         if serverless_functions_count > 0 or args.verbose_mode:
             progress_print(resource_count=serverless_functions_count, resource_type='Serverless Functions [App Service Plans]', subscription=subscription.display_name)
-            totals['App Service Plan Serverless Functions'] += serverless_functions_count
+            add_total('App Service Plan Serverless Functions', serverless_functions_count)
         return
 
     try:
@@ -723,7 +736,7 @@ def get_azure_functions_web_apps_app_service_plans(subscription):
 
     if serverless_functions_count > 0 or args.verbose_mode:
         progress_print(resource_count=serverless_functions_count, resource_type='Serverless Functions [App Service Plans]', subscription=subscription.display_name)
-        totals['Serverless Functions'] += serverless_functions_count
+        add_total('Serverless Functions', serverless_functions_count)
 
 
 # Registry Container Images: ACR
@@ -769,9 +782,10 @@ def get_azure_acr_images(subscription):
 
         if container_registry_images_count > 0 or args.verbose_mode:
             progress_print(resource_count=container_registry_images_count, resource_type='Registry Container Images [ACR]', subscription=subscription.display_name)
-            totals['Registry Container Images'] += container_registry_images_count
+            add_total('Registry Container Images', container_registry_images_count)
         return
 
+    registries = []
     try:
         registry_management_client = ContainerRegistryManagementClient(azure_credential, subscription.subscription_id, base_url=azure_base_url, credential_scopes=azure_credential_scopes)
         registries = registry_management_client.registries.list()
@@ -803,7 +817,7 @@ def get_azure_acr_images(subscription):
 
     if container_registry_images_count > 0 or args.verbose_mode:
         progress_print(resource_count=container_registry_images_count, resource_type='Registry Container Images [ACR]', subscription=subscription.display_name)
-        totals['Registry Container Images'] += container_registry_images_count
+        add_total('Registry Container Images', container_registry_images_count)
 
 
 # Data Buckets: Storage Containers
@@ -853,7 +867,7 @@ def get_azure_storage_containers(subscription):
 
     if bucket_count > 0 or args.verbose_mode:
         progress_print(resource_count=bucket_count, resource_type='Data Buckets [Storage Containers]', subscription=subscription.display_name)
-        totals['Data Buckets'] += bucket_count
+        add_total('Data Buckets', bucket_count)
 
 
 # Data in PaaS Databases: Azure SQL
@@ -875,7 +889,7 @@ def get_azure_sql_servers(subscription):
         sql_databases_count = result[0]['count_']
         if sql_databases_count > 0 or args.verbose_mode:
             progress_print(resource_count=sql_databases_count, resource_type='PaaS Databases [SQL]', subscription=subscription.display_name)
-            totals['PaaS Databases'] += sql_databases_count
+            add_total('PaaS Databases', sql_databases_count)
         return
 
     try:
@@ -900,7 +914,7 @@ def get_azure_sql_servers(subscription):
 
     if sql_databases_count > 0 or args.verbose_mode:
         progress_print(resource_count=sql_databases_count, resource_type='PaaS Databases [SQL]', subscription=subscription.display_name)
-        totals['PaaS Databases'] += sql_databases_count
+        add_total('PaaS Databases', sql_databases_count)
 
 
 # Asset Metadata: Azure Arc Machines
@@ -924,7 +938,7 @@ def get_azure_arc_machines(subscription):
 
     if machines_count > 0 or args.verbose_mode:
         progress_print(resource_count=machines_count, resource_type='Asset Metadata [Arc Machines]', subscription=subscription.display_name)
-        totals['Asset Metadata'] += machines_count
+        add_total('Asset Metadata', machines_count)
 
 
 # Asset Metadata: Azure Stack HCI Clusters
@@ -948,7 +962,7 @@ def get_azure_stack_hci_clusters(subscription):
 
     if clusters_count > 0 or args.verbose_mode:
         progress_print(resource_count=clusters_count, resource_type='Asset Metadata [Stack HCI Clusters]', subscription=subscription.display_name)
-        totals['Asset Metadata'] += clusters_count
+        add_total('Asset Metadata', clusters_count)
 
 
 ####
@@ -982,30 +996,34 @@ def get_azure_resources(subscription):
         if enabled['Registry Container Images']:
             get_azure_acr_images(subscription)
     else:
-        futures = []
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             if enabled['Virtual Machines']:
-                futures.append(executor.submit(get_azure_vms, subscription))
-                futures.append(executor.submit(get_azure_vms_scale_sets, subscription))
+                futures[executor.submit(get_azure_vms, subscription)] = 'Virtual Machines'
+                futures[executor.submit(get_azure_vms_scale_sets, subscription)] = 'Virtual Machine Scale Sets'
             if enabled['Container Hosts']:
-                futures.append(executor.submit(get_azure_aks_container_instances, subscription))
+                futures[executor.submit(get_azure_aks_container_instances, subscription)] = 'AKS Container Instances'
             if enabled['Serverless Functions']:
-                futures.append(executor.submit(get_azure_functions_web_apps, subscription))
+                futures[executor.submit(get_azure_functions_web_apps, subscription)] = 'Functions/Web Apps'
             if enabled['Serverless Containers']:
-                futures.append(executor.submit(get_azure_container_instances, subscription))
-                futures.append(executor.submit(get_azure_container_apps, subscription))
+                futures[executor.submit(get_azure_container_instances, subscription)] = 'Container Instances'
+                futures[executor.submit(get_azure_container_apps, subscription)] = 'Container Apps'
             if enabled['Asset Metadata']:
-                futures.append(executor.submit(get_azure_arc_machines, subscription))
-                futures.append(executor.submit(get_azure_stack_hci_clusters, subscription))
+                futures[executor.submit(get_azure_arc_machines, subscription)] = 'Arc Machines'
+                futures[executor.submit(get_azure_stack_hci_clusters, subscription)] = 'Stack HCI Clusters'
             if enabled['Data Buckets']:
-                futures.append(executor.submit(get_azure_storage_containers, subscription))
+                futures[executor.submit(get_azure_storage_containers, subscription)] = 'Storage Containers'
             if enabled['PaaS Databases']:
-                futures.append(executor.submit(get_azure_sql_servers, subscription))
+                futures[executor.submit(get_azure_sql_servers, subscription)] = 'SQL Servers'
             if enabled['Registry Container Images']:
-                futures.append(executor.submit(get_azure_acr_images, subscription))
+                futures[executor.submit(get_azure_acr_images, subscription)] = 'ACR Images'
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"{subscription.display_name} task={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} task(s) failed for subscription {subscription.display_name}")
 
 
 def output_results(subscriptions):

@@ -14,6 +14,7 @@ import json
 import os
 import signal
 import sys
+import threading
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -109,6 +110,9 @@ totals = {
 totals_log = []
 errors_log = []
 
+_image_os_cache = {}
+_image_os_cache_lock = threading.Lock()
+
 
 ####
 # Common Library Code
@@ -193,17 +197,15 @@ def get_oci_regions(config, signer):
         error_print(ex)
         error_print("Error getting OCI Regions.")
         error_print("Exiting...")
+        sys.exit(1)
     verbose_print(f"regions: {regions}")
     return regions
 
 
 def config_for_region(config, region):
-    """ Create or modify an OCI config with the specified region. """
-    region_config = config
-    if region_config:
-        region_config['region'] = region['region_key']
-    else:
-        region_config = {'region': region['region_key']}
+    """ Create a copy of the OCI config with the specified region (never mutate the shared config). """
+    region_config = dict(config) if config else {}
+    region_config['region'] = region['region_key']
     return region_config
 
 
@@ -241,7 +243,7 @@ def get_oci_instances_and_oke_instances(config, signer, compartment, regions):
         for instance in instances:
             verbose_print(f"virtual_machine: {instance}")
             instances_count += 1
-            if 'defined_tags' in instance and 'Oracle-Tags' in instance['defined_tags'] and instance['defined_tags']['Oracle-Tags']['CreatedBy'] == 'oke':
+            if instance.get('defined_tags', {}).get('Oracle-Tags', {}).get('CreatedBy') == 'oke':
                 container_instances_count += 1
             operating_system = get_oci_image_operating_system(core_client, instance['additional_details']['imageId'])
             if operating_system and 'win' not in operating_system.lower():
@@ -259,14 +261,20 @@ def get_oci_instances_and_oke_instances(config, signer, compartment, regions):
 
 
 def get_oci_image_operating_system(core_client, image_id):
-    """ Get OCI Compute Image """
+    """ Get OCI Compute Image operating system, cached by image_id to avoid N+1 API calls. """
+    with _image_os_cache_lock:
+        if image_id in _image_os_cache:
+            return _image_os_cache[image_id]
     try:
         image = core_client.get_image(image_id=image_id)
         verbose_print(f"image: {image.data}")
-        return image.data.operating_system
+        os_name = image.data.operating_system
     except Exception as ex:  # pylint: disable=broad-exception-caught
         error_print(f"Exception getting Operating System for Image: {image_id}: {ex}")
-        return ''
+        os_name = ''
+    with _image_os_cache_lock:
+        _image_os_cache[image_id] = os_name
+    return os_name
 
 
 # Serverless Functions: FunctionsFunction (FunctionsApplication ?)
@@ -352,17 +360,21 @@ def get_oci_resources(config, signer, compartment, regions):
         if enabled['Data Buckets']:
             get_oci_buckets(config, signer=signer, compartment=compartment, regions=regions)
     else:
-        futures = []
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             if enabled['Virtual Machines'] or enabled['Container Hosts']:
-                futures.append(executor.submit(get_oci_instances_and_oke_instances, config, compartment=compartment, signer=signer, regions=regions))
+                futures[executor.submit(get_oci_instances_and_oke_instances, config, compartment=compartment, signer=signer, regions=regions)] = 'Compute/OKE instances'
                 if enabled['Serverless Functions']:
-                    futures.append(executor.submit(get_oci_cloud_functions_function, config, signer=signer, compartment=compartment, regions=regions))
+                    futures[executor.submit(get_oci_cloud_functions_function, config, signer=signer, compartment=compartment, regions=regions)] = 'Cloud Functions'
             if enabled['Data Buckets']:
-                futures.append(executor.submit(get_oci_buckets, config, signer=signer, compartment=compartment, regions=regions))
+                futures[executor.submit(get_oci_buckets, config, signer=signer, compartment=compartment, regions=regions)] = 'Object Storage buckets'
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"{compartment['id']} task={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} task(s) failed for compartment {compartment['id']}")
 
 
 def output_results(compartments):

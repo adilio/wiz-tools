@@ -362,14 +362,14 @@ def output_results():
             csv_writer.writerow([resource_type, resource_count])
 
     # Log File
-    #with open(output_file_log, 'w', encoding='utf-8') as csv_file:
-    #    csv_writer = csv.writer(csv_file)
-    #    csv_writer.writerow(['Resource Type', 'Resource Count'])
-    #    for item in totals_log:
-    #        csv_writer.writerow(item)
+    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['Resource Type', 'Resource Count'])
+        for item in totals_log:
+            csv_writer.writerow(item)
 
     # Summary
-    print("\nResults (script version: {version})\n")
+    print(f"\nResults (script version: {version})\n")
 
     print(f"{str(totals['Asset Metadata']).rjust(padding)} Asset Metadata [Linodes, LKE Linodes, Object Storage Buckets, MongoDB, MySQL, PostgreSQL Databases]")
 

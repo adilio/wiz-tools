@@ -11,6 +11,7 @@ import inspect
 import os
 import signal
 import sys
+import threading
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -201,6 +202,13 @@ totals = {
 
 totals_log = []
 errors_log = []
+totals_lock = threading.Lock()
+log_lock = threading.Lock()
+
+
+def add_total(key, value):
+    with totals_lock:
+        totals[key] += value
 
 
 try:
@@ -233,7 +241,8 @@ def progress_print(resource_count, resource_type, account='', region='', details
     rc = str(resource_count).rjust(padding)
     # Split and join to remove multiple spaces when variables are empty.
     print(' '.join(f"- {rc} {resource_type} in {region} {details}".split()))
-    totals_log.append([resource_type, resource_count, account, region])
+    with log_lock:
+        totals_log.append([resource_type, resource_count, account, region])
 
 
 def verbose_print(details):
@@ -254,7 +263,8 @@ def error_print(details, account=''):
     except Exception:  # pylint: disable=broad-exception-caught
         pass
     print(f"\nERROR: {account} {function} {details}\n")
-    errors_log.append(f"ERROR: {account} {function} {details}")
+    with log_lock:
+        errors_log.append(f"ERROR: {account} {function} {details}")
 
 
 ####
@@ -501,7 +511,7 @@ def get_aws_ec2_instances(region, credentials, account):
                     continue
                 instances_count += 1
                 non_os_disks_count += get_aws_ec2_instance_non_os_disks_count(instance)
-                if 'PlatformDetails' in instance and 'win' not in instance['PlatformDetails'].lower():
+                if instance.get('platform') == 'LINUX_UNIX':
                     linux_instances_count += 1
     while 'NextToken' in response:
         try:
@@ -521,14 +531,14 @@ def get_aws_ec2_instances(region, credentials, account):
                         continue
                     instances_count += 1
                     non_os_disks_count += get_aws_ec2_instance_non_os_disks_count(instance)
-                    if 'PlatformDetails' in instance and 'win' not in instance['PlatformDetails'].lower():
+                    if instance.get('platform') == 'LINUX_UNIX':
                         linux_instances_count += 1
 
     if instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=instances_count, resource_type='Virtual Machines [EC2]', region=region, account=account['Name'], details=f"with {non_os_disks_count} Non-OS Disks")
-        totals['Virtual Machines'] += instances_count
-        totals['Non-OS Disks'] += non_os_disks_count
-        totals['Virtual Machine Sensors'] += linux_instances_count
+        add_total('Virtual Machines', instances_count)
+        add_total('Non-OS Disks', non_os_disks_count)
+        add_total('Virtual Machine Sensors', linux_instances_count)
 
 
 def get_aws_ec2_instance_non_os_disks_count(instance):
@@ -566,7 +576,7 @@ def get_aws_lightsail_instances(region, credentials, account):
             continue
         instances_count += 1
         non_os_disks_count += get_aws_lightsail_non_os_disks_count(instance)
-        if 'PlatformDetails' in instance and 'win' not in instance['PlatformDetails'].lower():
+        if instance.get('platform') == 'LINUX_UNIX':
             linux_instances_count += 1
     while 'nextPageToken' in response:
         try:
@@ -583,14 +593,14 @@ def get_aws_lightsail_instances(region, credentials, account):
                 continue
             instances_count += 1
             non_os_disks_count += get_aws_lightsail_non_os_disks_count(instance)
-            if 'PlatformDetails' in instance and 'win' not in instance['PlatformDetails'].lower():
+            if instance.get('platform') == 'LINUX_UNIX':
                 linux_instances_count += 1
 
     if instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=instances_count, resource_type='Virtual Machines [Lightsail]', region=region, account=account['Name'], details=f"with {non_os_disks_count} Non-OS Disks")
-        totals['Virtual Machines'] += instances_count
-        totals['Non-OS Disks'] += non_os_disks_count
-        totals['Virtual Machine Sensors'] += linux_instances_count
+        add_total('Virtual Machines', instances_count)
+        add_total('Non-OS Disks', non_os_disks_count)
+        add_total('Virtual Machine Sensors', linux_instances_count)
 
 
 def get_aws_lightsail_non_os_disks_count(instance):
@@ -648,8 +658,8 @@ def get_aws_ecs_container_instances(region, credentials, account):
 
     if ecs_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=ecs_instances_count, resource_type='Container Hosts [ECS]', region=region, account=account['Name'])
-        totals['Container Hosts'] += ecs_instances_count
-        totals['Kubernetes Sensors'] += ecs_instances_count
+        add_total('Container Hosts', ecs_instances_count)
+        add_total('Kubernetes Sensors', ecs_instances_count)
 
 
 # Container Hosts: EKS
@@ -717,24 +727,14 @@ def get_aws_eks_instances(region, credentials, account):
             continue
         if fargate_profiles:
             eks_containers_count += get_aws_cluster_fargate_pod_count(eks_client, cluster_name, account)
-        while 'NextToken' in response:
-            try:
-                fargate_profiles_response = eks_client.list_fargate_profiles(clusterName=cluster_name, NextToken=response['NextToken'])
-                fargate_profiles = fargate_profiles_response.get('fargateProfileNames', [])
-            except Exception as ex:  # pylint: disable=broad-exception-caught
-                fargate_profiles = []
-                error_print(ex, account['Id'])
-                continue
-            if fargate_profiles:
-                eks_containers_count += get_aws_cluster_fargate_pod_count(eks_client, cluster_name, account)
 
     if eks_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=eks_instances_count, resource_type='Container Hosts [EKS]', region=region, account=account['Name'])
-        totals['Container Hosts'] += eks_instances_count
-        totals['Kubernetes Sensors'] += eks_instances_count
+        add_total('Container Hosts', eks_instances_count)
+        add_total('Kubernetes Sensors', eks_instances_count)
     if eks_containers_count > 0 or args.verbose_mode:
         progress_print(resource_count=eks_containers_count, resource_type='Serverless Containers [EKS Fargate]', region=region, account=account['Name'])
-        totals['Serverless Containers'] += eks_containers_count
+        add_total('Serverless Containers', eks_containers_count)
 
 
 def get_aws_cluster_fargate_pod_count(eks_client, cluster_name, account):
@@ -811,7 +811,7 @@ def get_aws_lambda_functions(region, credentials, account):
     if serverless_functions_count > 0 or args.verbose_mode:
         serverless_functions_count += serverless_functions_versions_count
         progress_print(resource_count=serverless_functions_count, resource_type='Serverless Functions [Lambda]', region=region, account=account['Name'])
-        totals['Serverless Functions'] += serverless_functions_count
+        add_total('Serverless Functions', serverless_functions_count)
 
 
 # Serverless Functions: Lambda Function Versions
@@ -881,8 +881,8 @@ def get_aws_ecs_resources(region, credentials, account):
 
     if ecs_containers_count > 0 or args.verbose_mode:
         progress_print(resource_count=ecs_containers_count, resource_type='Serverless Containers [ECS Fargate]', region=region, account=account['Name'])
-        totals['Serverless Containers'] += ecs_containers_count
-        totals['Serverless Container Sensors'] += ecs_tasks_count
+        add_total('Serverless Containers', ecs_containers_count)
+        add_total('Serverless Container Sensors', ecs_tasks_count)
 
 
 # Serverless Containers: SageMaker Domains
@@ -910,7 +910,7 @@ def get_aws_sagemaker_domains(region, credentials, account):
 
     if sagemaker_domains_count > 0 or args.verbose_mode:
         progress_print(resource_count=sagemaker_domains_count, resource_type='Serverless Containers [SageMaker Domains]', region=region, account=account['Name'])
-        totals['Serverless Containers'] += sagemaker_domains_count
+        add_total('Serverless Containers', sagemaker_domains_count)
 
 
 # Serverless Containers: SageMaker Endpoints
@@ -938,7 +938,7 @@ def get_aws_sagemaker_endpoints(region, credentials, account):
 
     if sagemaker_endpoints_count > 0 or args.verbose_mode:
         progress_print(resource_count=sagemaker_endpoints_count, resource_type='Serverless Containers [SageMaker Endpoints]', region=region, account=account['Name'])
-        totals['Serverless Containers'] += sagemaker_endpoints_count
+        add_total('Serverless Containers', sagemaker_endpoints_count)
 
 
 # Registry Container Images: ECR
@@ -985,7 +985,7 @@ def get_aws_ecr_images(region, credentials, account):
 
     if container_registry_images_count > 0 or args.verbose_mode:
         progress_print(resource_count=container_registry_images_count, resource_type='Registry Container Images [ECR]', region=region, account=account['Name'])
-        totals['Registry Container Images'] += container_registry_images_count
+        add_total('Registry Container Images', container_registry_images_count)
 
 
 # Data Buckets: S3 Buckets
@@ -1015,7 +1015,7 @@ def get_aws_s3_buckets(region, credentials, account):
 
     if buckets_count > 0 or args.verbose_mode:
         progress_print(resource_count=buckets_count, resource_type='Data Buckets [S3]', region=region, account=account['Name'])
-        totals['Data Buckets'] += buckets_count
+        add_total('Data Buckets', buckets_count)
 
 
 # Data in PaaS Databases (PaaS): DocumentDB
@@ -1033,7 +1033,7 @@ def get_aws_docdb_clusters(region, credentials, account):
     database_clusters_count += len(response['DBClusters'])
     while 'Marker' in response:
         try:
-            response = client.describe_db_instances(Marker=response['Marker'])
+            response = client.describe_db_clusters(Marker=response['Marker'])
         except Exception as ex:  # pylint: disable=broad-exception-caught
             response = {}
             error_print(ex, account['Id'])
@@ -1042,7 +1042,7 @@ def get_aws_docdb_clusters(region, credentials, account):
 
     if database_clusters_count > 0 or args.verbose_mode:
         progress_print(resource_count=database_clusters_count, resource_type='PaaS Databases [DocumentDB]', region=region, account=account['Name'])
-        totals['PaaS Databases'] += database_clusters_count
+        add_total('PaaS Databases', database_clusters_count)
 
 
 # Data in PaaS Databases (PaaS): RDS Aurora (MySQL, PostgreSQL)
@@ -1074,7 +1074,7 @@ def get_aws_rds_aurora_clusters(region, credentials, account):
 
     if database_clusters_count > 0 or args.verbose_mode:
         progress_print(resource_count=database_clusters_count, resource_type='PaaS Databases [RDS Aurora]', region=region, account=account['Name'])
-        totals['PaaS Databases'] += database_clusters_count
+        add_total('PaaS Databases', database_clusters_count)
 
 
 # Data in PaaS Databases (PaaS): RDS (MariaDB, MSSQL, MySQL, Oracle, PostgreSQL)
@@ -1106,7 +1106,7 @@ def get_aws_rds_instances(region, credentials, account):
 
     if database_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=database_instances_count, resource_type='PaaS Databases [RDS]', region=region, account=account['Name'])
-        totals['PaaS Databases'] += database_instances_count
+        add_total('PaaS Databases', database_instances_count)
 
 
 # Data in PaaS Databases (PaaS): RedShift
@@ -1133,7 +1133,7 @@ def get_aws_redshift_clusters(region, credentials, account):
 
     if database_clusters_count > 0 or args.verbose_mode:
         progress_print(resource_count=database_clusters_count, resource_type='PaaS Databases [RedShift]', region=region, account=account['Name'])
-        totals['PaaS Databases'] += database_clusters_count
+        add_total('PaaS Databases', database_clusters_count)
 
 
 # Data in Data Warehouses: DynamoDB
@@ -1163,7 +1163,7 @@ def get_aws_dynamodb_tables(region, credentials, account):
 
     if data_warehouses_count > 0 or args.verbose_mode:
         progress_print(resource_count=data_warehouses_count, resource_type='Data Warehouses [DynamoDB]', region=region, account=account['Name'])
-        totals['Data Warehouses'] += data_warehouses_count
+        add_total('Data Warehouses', data_warehouses_count)
 
 
 ####
@@ -1219,38 +1219,43 @@ def get_aws_resources(account, current_account_id, root_account_id):
         if enabled['Data Buckets']:
             get_aws_s3_buckets(region=select_default_region(), credentials=credentials, account=account)
     else:
-        futures = []
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             # AWS APIs requiring a regional client.
             for region in regions:
+                r = region['RegionName']
                 if enabled['Virtual Machines']:
-                    futures.append(executor.submit(get_aws_ec2_instances, region=region['RegionName'], credentials=credentials, account=account))
-                    if region['RegionName'] in lightsail_regions:
-                        futures.append(executor.submit(get_aws_lightsail_instances, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_ec2_instances, region=r, credentials=credentials, account=account)] = f'{r} EC2 instances'
+                    if r in lightsail_regions:
+                        futures[executor.submit(get_aws_lightsail_instances, region=r, credentials=credentials, account=account)] = f'{r} Lightsail instances'
                 if enabled['Container Hosts']:
-                    futures.append(executor.submit(get_aws_ecs_container_instances, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_eks_instances, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_ecs_container_instances, region=r, credentials=credentials, account=account)] = f'{r} ECS container instances'
+                    futures[executor.submit(get_aws_eks_instances, region=r, credentials=credentials, account=account)] = f'{r} EKS instances'
                 if enabled['Serverless Functions']:
-                    futures.append(executor.submit(get_aws_lambda_functions, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_lambda_functions, region=r, credentials=credentials, account=account)] = f'{r} Lambda functions'
                 if enabled['Serverless Containers']:
-                    futures.append(executor.submit(get_aws_ecs_resources, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_sagemaker_domains, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_sagemaker_endpoints, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_ecs_resources, region=r, credentials=credentials, account=account)] = f'{r} ECS resources'
+                    futures[executor.submit(get_aws_sagemaker_domains, region=r, credentials=credentials, account=account)] = f'{r} SageMaker domains'
+                    futures[executor.submit(get_aws_sagemaker_endpoints, region=r, credentials=credentials, account=account)] = f'{r} SageMaker endpoints'
                 if enabled['PaaS Databases']:
-                    futures.append(executor.submit(get_aws_docdb_clusters, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_rds_aurora_clusters, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_rds_instances, region=region['RegionName'], credentials=credentials, account=account))
-                    futures.append(executor.submit(get_aws_redshift_clusters, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_docdb_clusters, region=r, credentials=credentials, account=account)] = f'{r} DocumentDB clusters'
+                    futures[executor.submit(get_aws_rds_aurora_clusters, region=r, credentials=credentials, account=account)] = f'{r} RDS Aurora clusters'
+                    futures[executor.submit(get_aws_rds_instances, region=r, credentials=credentials, account=account)] = f'{r} RDS instances'
+                    futures[executor.submit(get_aws_redshift_clusters, region=r, credentials=credentials, account=account)] = f'{r} Redshift clusters'
                 if enabled['Data Warehouses']:
-                    futures.append(executor.submit(get_aws_dynamodb_tables, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_dynamodb_tables, region=r, credentials=credentials, account=account)] = f'{r} DynamoDB tables'
                 if enabled['Registry Container Images']:
-                    futures.append(executor.submit(get_aws_ecr_images, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_ecr_images, region=r, credentials=credentials, account=account)] = f'{r} ECR images'
             # S3 APIs using a global control plane, so we use the "default" partition region.
             if enabled['Data Buckets']:
-                futures.append(executor.submit(get_aws_s3_buckets, region=select_default_region(), credentials=credentials, account=account))
+                futures[executor.submit(get_aws_s3_buckets, region=select_default_region(), credentials=credentials, account=account)] = 'S3 buckets'
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"{account['Id']} task={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} task(s) failed for account {account['Id']} {account['Name']}")
 
 
 def output_results(accounts):

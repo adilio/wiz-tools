@@ -1724,41 +1724,46 @@ def get_aws_resources(account, current_account_id, root_account_id):
         if enabled['Global Accelerators']:
             get_aws_global_accelerators(region='us-west-2', credentials=credentials, account=account)
     else:
-        futures = []
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             # AWS APIs requiring a regional client.
             for region in regions:
+                r = region['RegionName']
                 if enabled['Virtual Machines']:
-                    futures.append(executor.submit(get_aws_ec2_instances, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_ec2_instances, region=r, credentials=credentials, account=account)] = f'{r} EC2 instances'
                 if enabled['Serverless Functions']:
-                    futures.append(executor.submit(get_aws_lambda_functions, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_lambda_functions, region=r, credentials=credentials, account=account)] = f'{r} Lambda functions'
                 if enabled['Elastic IP Addresses']:
-                    futures.append(executor.submit(get_aws_elastic_ips, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_elastic_ips, region=r, credentials=credentials, account=account)] = f'{r} Elastic IPs'
                 if enabled['Load Balancers']:
-                    futures.append(executor.submit(get_aws_load_balancers, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_load_balancers, region=r, credentials=credentials, account=account)] = f'{r} load balancers'
                 if enabled['EKS Clusters']:
-                    futures.append(executor.submit(get_aws_eks_clusters, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_eks_clusters, region=r, credentials=credentials, account=account)] = f'{r} EKS clusters'
                 if enabled['API Gateways']:
-                    futures.append(executor.submit(get_aws_api_gateways, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_api_gateways, region=r, credentials=credentials, account=account)] = f'{r} API gateways'
                 if enabled['SageMaker Endpoints']:
-                    futures.append(executor.submit(get_aws_sagemaker_endpoints, region=region['RegionName'], credentials=credentials, account=account))
+                    futures[executor.submit(get_aws_sagemaker_endpoints, region=r, credentials=credentials, account=account)] = f'{r} SageMaker endpoints'
             # S3 APIs using a global control plane, so we use the "default" partition region.
             if enabled['Data Buckets']:
-                futures.append(executor.submit(get_aws_s3_buckets, region=select_default_region(), credentials=credentials, account=account))
+                futures[executor.submit(get_aws_s3_buckets, region=select_default_region(), credentials=credentials, account=account)] = 'S3 buckets'
             # Route53 APIs using a global control plane.
             if enabled['Route53 Hosted Zones']:
-                futures.append(executor.submit(get_aws_route53_hosted_zones, region=select_default_region(), credentials=credentials, account=account))
+                futures[executor.submit(get_aws_route53_hosted_zones, region=select_default_region(), credentials=credentials, account=account)] = 'Route53 hosted zones'
             if enabled['Route53 DNS Records']:
-                futures.append(executor.submit(get_aws_route53_dns_records, region=select_default_region(), credentials=credentials, account=account))
+                futures[executor.submit(get_aws_route53_dns_records, region=select_default_region(), credentials=credentials, account=account)] = 'Route53 DNS records'
             # CloudFront APIs using a global control plane.
             if enabled['CloudFront Distributions']:
-                futures.append(executor.submit(get_aws_cloudfront_distributions, region=select_default_region(), credentials=credentials, account=account))
+                futures[executor.submit(get_aws_cloudfront_distributions, region=select_default_region(), credentials=credentials, account=account)] = 'CloudFront distributions'
             # Global Accelerator API (only available in us-west-2).
             if enabled['Global Accelerators']:
-                futures.append(executor.submit(get_aws_global_accelerators, region='us-west-2', credentials=credentials, account=account))
+                futures[executor.submit(get_aws_global_accelerators, region='us-west-2', credentials=credentials, account=account)] = 'Global Accelerators'
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"{account['Id']} task={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} task(s) failed for account {account['Id']} {account['Name']}")
 
 
 def output_results(accounts, scan_results=None):

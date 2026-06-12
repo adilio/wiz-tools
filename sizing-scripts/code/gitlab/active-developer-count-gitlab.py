@@ -470,7 +470,7 @@ def output_results(gitlab_projects):
                 err_file.write(error + "\n")
 
     # Summary
-    project_details = f" in Project: {args.pro}" if args.proj else f" across {len(gitlab_projects)} Projects"
+    project_details = f" in Project: {args.proj}" if args.proj else f" across {len(gitlab_projects)} Projects"
     group_details   = f" in Group: {args.group}" if args.group else ""
     print(f"\nResults (Active Developers in the last {number_of_days} days)\n")
     print(f"- {len(developers_across_repos_set)} Developers{project_details}{group_details}")
@@ -509,12 +509,14 @@ def main():
         group = get_group(client)
         if not group:
             print("Exiting...")
+            sys.exit(1)
         projects = get_group_projects(group)
     else:
         if args.proj:
             project = get_project(client, args.proj)
             if not project:
                 print("Exiting...")
+                sys.exit(1)
             projects = [project]
         else:
             projects = get_projects(client)
@@ -530,18 +532,22 @@ def main():
             else:
                 get_active_developers(project)
     else:
-        futures = []
-        exceptions = 0
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             for project in projects:
                 gitlab_projects.append(GitLabProject(name_with_namespace=project.name_with_namespace, visibility=project.visibility))
                 if args.group:
-                    futures.append(executor.submit(get_active_developers, client.projects.get(project.id)))
+                    p = client.projects.get(project.id)
+                    futures[executor.submit(get_active_developers, p)] = project.name_with_namespace
                 else:
-                    futures.append(executor.submit(get_active_developers, project))
+                    futures[executor.submit(get_active_developers, project)] = project.name_with_namespace
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"project={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} project task(s) failed")
     output_results(gitlab_projects)
 
 

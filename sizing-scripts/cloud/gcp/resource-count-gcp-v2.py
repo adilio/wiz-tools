@@ -268,6 +268,8 @@ totals_log = []
 errors_log = []
 log_lock = threading.Lock()
 totals_lock = threading.Lock()
+_gcp_image_cache = {}
+_gcp_image_cache_lock = threading.Lock()
 
 try:
     google_auth_credential, _ = google.auth.default()
@@ -662,7 +664,7 @@ def get_gce_instances_and_gke_instances(project_id, project_name):
 
 
 def get_disk_image_details(client, project_id, disk):
-    """ Get Compute Disk Image Details """
+    """ Get Compute Disk Image Details, caching images().get results to avoid N+1 API calls. """
     image_detail = {}
     disk_zone = disk['source'].split('/')[-3]
     disk_name = disk['source'].split('/')[-1]
@@ -671,8 +673,14 @@ def get_disk_image_details(client, project_id, disk):
         verbose_print(f"disk detail: {disk_detail}")
         image_name = disk_detail['sourceImage'].split('/')[-1]
         image_project = disk_detail['sourceImage'].split('/')[-4]
+        cache_key = (image_project, image_name)
+        with _gcp_image_cache_lock:
+            if cache_key in _gcp_image_cache:
+                return _gcp_image_cache[cache_key]
         image_detail = client.images().get(project=image_project, image=image_name).execute(num_retries=google_api_config['num_retries'])
         verbose_print(f"disk image: {image_detail}")
+        with _gcp_image_cache_lock:
+            _gcp_image_cache[cache_key] = image_detail
     except Exception as ex:  # pylint: disable=broad-exception-caught
         error_print(ex, project_id)
     return image_detail

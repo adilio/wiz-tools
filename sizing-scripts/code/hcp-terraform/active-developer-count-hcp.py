@@ -88,8 +88,8 @@ def error_print(details):
 
 
 def days_ago_iso():
-    """ Calculate a DateTime a number of days ago """
-    dt_now = datetime.datetime.now()
+    """ Calculate a UTC DateTime a number of days ago (ISO format, comparable to HCP's created-at) """
+    dt_now = datetime.datetime.now(datetime.timezone.utc)
     dt_off = datetime.timedelta(days=number_of_days)
     result = (dt_now - dt_off).isoformat()
     verbose_print(f"Days Ago: {number_of_days} is: {result}")
@@ -131,9 +131,12 @@ def paginated_api_call(url: str, params: dict = None):
     result = {}
     verbose_print(url)
     links = {'next': url}
+    max_retries = 5
+    retry_count = 0
     while links['next']:
         response = requests.get(links['next'], params=params, headers=headers, timeout=360)
         if response.status_code == 200:
+            retry_count = 0
             response_dict = response.json()
             verbose_print(response_dict)
             objects = response_dict.get('data', [])
@@ -143,9 +146,15 @@ def paginated_api_call(url: str, params: dict = None):
             links = response_dict.get('links', {'next': None})
         elif response.status_code == 429:
             verbose_print('Rate Limit Exceeded')
-            time.sleep(1)
+            retry_after = int(response.headers.get('Retry-After', 1))
+            time.sleep(max(retry_after, 1))
         else:
-            error_print(f"{response.status_code}, {response.text}")
+            retry_count += 1
+            error_print(f"HTTP {response.status_code}: {response.text} (attempt {retry_count}/{max_retries})")
+            if retry_count >= max_retries:
+                error_print(f"Giving up after {max_retries} consecutive errors; returning partial results")
+                break
+            time.sleep(2 ** retry_count)
     return result
 
 
@@ -384,22 +393,24 @@ def main():
                             continue
                     if user['attributes']['is-service-account']:
                         service_account_cache[user['id']] = user
-                    else:
-                        user_cache[user['id']] = user
+                        continue
+                    user_cache[user['id']] = user
                     if user['id'] in member_cache:
                         # Use email from Organization Memberships, when available, to deduplicate across our other active developer scripts.
                         developers[member_cache[user['id']]['attributes']['email']] = user
-                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}/{member_cache[user['id']]['attributes']['email']}) Service Account: {user['attributes']['is-service-account']}")
+                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}/{member_cache[user['id']]['attributes']['email']})")
                     else:
                         developers[user['id']] = user
-                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}) Service Account: {user['attributes']['is-service-account']}")
+                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']})")
                 elif run['attributes']['source'] == 'tfe-configuration-version':
                     if 'configuration-version' not in run['relationships']:
                         continue
-                    configuration_version = run['relationships']['configuration-version']['data']
-                    configuration_version = get_configuration_version(configuration_version['id'])
+                    cv_ref = run['relationships']['configuration-version']['data']
+                    configuration_version = get_configuration_version(cv_ref['id'])
+                    if not configuration_version or 'id' not in configuration_version:
+                        continue
                     configuration_version_commit = get_configuration_version_commit(configuration_version['id'])
-                    if configuration_version and configuration_version_commit and 'sender-username' in configuration_version_commit['attributes']:
+                    if configuration_version_commit and 'sender-username' in configuration_version_commit.get('attributes', {}):
                         developers[configuration_version_commit['attributes']['sender-username']] = configuration_version_commit
                         print(f"                Workspace Run: {run_id} Created by Commiter: {configuration_version_commit['attributes']['sender-username']} in {configuration_version['attributes']['source']} ")
             print('        Done (Workspace-Level Runs)')
@@ -434,22 +445,24 @@ def main():
                         continue
                 if user['attributes']['is-service-account']:
                     service_account_cache[user['id']] = user
-                else:
-                    user_cache[user['id']] = user
+                    continue
+                user_cache[user['id']] = user
                 if user['id'] in member_cache:
                     # Use email from Organization Memberships, when available, to deduplicate across our other active developer scripts.
                     developers[member_cache[user['id']]['attributes']['email']] = user
-                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']} / {member_cache[user['id']]['attributes']['email']}) Service Account: {user['attributes']['is-service-account']}")
+                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']} / {member_cache[user['id']]['attributes']['email']})")
                 else:
                     developers[user['id']] = user
-                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}) Service Account: {user['attributes']['is-service-account']}")
+                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']})")
             elif run['attributes']['source'] == 'tfe-configuration-version':
                 if 'configuration-version' not in run['relationships']:
                     continue
-                configuration_version = run['relationships']['configuration-version']['data']
-                configuration_version = get_configuration_version(configuration_version['id'])
+                cv_ref = run['relationships']['configuration-version']['data']
+                configuration_version = get_configuration_version(cv_ref['id'])
+                if not configuration_version or 'id' not in configuration_version:
+                    continue
                 configuration_version_commit = get_configuration_version_commit(configuration_version['id'])
-                if configuration_version and configuration_version_commit and 'sender-username' in configuration_version_commit['attributes']:
+                if configuration_version_commit and 'sender-username' in configuration_version_commit.get('attributes', {}):
                     developers[configuration_version_commit['attributes']['sender-username']] = configuration_version_commit
                     print(f"        Organization Run: {run_id} Created by Commiter: {configuration_version_commit['attributes']['sender-username']} in {configuration_version['attributes']['source']} ")
         print('    Done (Organization-Level Runs)')

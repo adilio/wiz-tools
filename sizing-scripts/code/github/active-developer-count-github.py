@@ -136,8 +136,8 @@ def error_print(details, repository=''):
 
 
 def days_ago():
-    """ Calculate a DateTime a number of days ago """
-    dt_now = datetime.datetime.now()
+    """ Calculate a timezone-aware DateTime a number of days ago (UTC) """
+    dt_now = datetime.datetime.now(datetime.timezone.utc)
     dt_off = datetime.timedelta(days=number_of_days)
     result = dt_now - dt_off
     verbose_print(f"Days Ago: {number_of_days} is: {result}")
@@ -189,8 +189,9 @@ def rate_limited_retry(function):
                 return function(*aargs, **kwargs)
             except github.RateLimitExceededException as e:
                 print("Rate limit exceeded. Waiting to retry...")
-                reset_time = datetime.fromtimestamp(e.headers['X-RateLimit-Reset'])
-                wait_seconds = (reset_time - datetime.now()).total_seconds()
+                reset_timestamp = int(e.headers.get('X-RateLimit-Reset', 0))
+                reset_time = datetime.datetime.fromtimestamp(reset_timestamp, tz=datetime.timezone.utc)
+                wait_seconds = max((reset_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds() + 1, 1)
                 time.sleep(wait_seconds)
             except Exception as e:
                 print(f"An unexpected error occurred: {e}")
@@ -486,6 +487,7 @@ def main():
             repository = get_repository(organization)
             if not repository:
                 print("Exiting...")
+                sys.exit(1)
             repositories = [repository]
         else:
             repositories = get_repositories(organization)
@@ -495,6 +497,7 @@ def main():
             repository = get_repository(user)
             if not repository:
                 print("Exiting...")
+                sys.exit(1)
             repositories = [repository]
         else:
             repositories = get_repositories(user)
@@ -502,14 +505,17 @@ def main():
         for repository in repositories:
             get_active_developers(repository)
     else:
-        futures = []
-        exceptions = 0
+        futures = {}
+        failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             for repository in repositories:
-                futures.append(executor.submit(get_active_developers, repository))
+                futures[executor.submit(get_active_developers, repository)] = repository.full_name
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
-                exceptions += 1
+                failed_tasks += 1
+                error_print(future.exception(), f"repo={futures[future]}")
+        if failed_tasks:
+            error_print(f"{failed_tasks} repository task(s) failed")
     output_results(repositories)
 
 

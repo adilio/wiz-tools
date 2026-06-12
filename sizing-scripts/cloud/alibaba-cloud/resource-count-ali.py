@@ -525,7 +525,7 @@ def get_ali_cluster_instances(account=None, region_id=None, role_arn=None):
         if page_size >= total_count:
             last_page_number = 1
         else:
-            last_page_number = math.floor(total_count / page_size)
+            last_page_number = math.ceil(total_count / page_size)
     except Exception as ex:  # pylint: disable=broad-exception-caught
         error_print(ex)
         response = None
@@ -542,9 +542,9 @@ def get_ali_cluster_instances(account=None, region_id=None, role_arn=None):
             container_host_instances_count += cluster.size
         page_number = response.body.page_info.page_number
         next_page_number = page_number + 1
-        if next_page_number < last_page_number:
+        if next_page_number <= last_page_number:
             try:
-                request.page_number(next_page_number)
+                request.page_number = next_page_number
                 response = client.describe_clusters_v1with_options(request, headers, runtime)
             except Exception as ex:  # pylint: disable=broad-exception-caught
                 error_print(ex)

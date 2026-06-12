@@ -94,8 +94,12 @@ if not args.account:
     print("ERROR: Must specify --account")
     sys.exit(1)
 
-args_organization, args_account = args.account.split('-')
-if not args_organization and args_account:
+_parts = args.account.split('-', 1)
+if len(_parts) < 2:
+    args_organization, args_account = '', args.account
+else:
+    args_organization, args_account = _parts
+if not (args_organization and args_account):
     print()
     print("ERROR: Must specify --account in format: ORGANIZATION-ACCOUNT")
     sys.exit(1)
@@ -224,7 +228,8 @@ def get_schemas(connection_params, account, database):
         connection = snowflake.connector.connect(**connection_params)
         cursor = connection.cursor()
         # https://docs.snowflake.com/en/sql-reference/info-schema/schemata
-        cursor.execute(f"SELECT CATALOG_NAME,SCHEMA_NAME,SCHEMA_OWNER,IS_TRANSIENT, IS_MANAGED_ACCESS FROM {database}.INFORMATION_SCHEMA.SCHEMATA ORDER BY SCHEMA_NAME")
+        safe_db = database.replace('"', '""')
+        cursor.execute(f'SELECT CATALOG_NAME,SCHEMA_NAME,SCHEMA_OWNER,IS_TRANSIENT,IS_MANAGED_ACCESS FROM "{safe_db}".INFORMATION_SCHEMA.SCHEMATA ORDER BY SCHEMA_NAME')
         result = cursor.fetchall()
         verbose_print(result)
     except Exception as ex:  # pylint: disable=broad-exception-caught
@@ -274,7 +279,7 @@ def output_results(account_names, database_names):
 
     if errors_log:
         print("\nExceptions occurred.")
-        print(f"Review {error_log_file} or rerun with '--debug' to disable parallel processing and exit upon first error.")
+        print(f"Review {error_log_file} for error details.")
 
 
 def main():
@@ -282,7 +287,7 @@ def main():
     account_names  = []
     database_names = []
 
-    organization, account = args.account.split('-')
+    organization, account = args.account.split('-', 1)
     connection_params= {'account': args.account, 'role': args.role, 'warehouse': args.warehouse}
     # Support key-pair, token, and user/password authentication
     if args.private_key_file:
