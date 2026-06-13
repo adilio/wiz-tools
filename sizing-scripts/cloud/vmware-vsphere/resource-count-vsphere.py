@@ -13,6 +13,7 @@ import os
 import signal
 import ssl
 import sys
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -94,6 +95,12 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV files (default: current directory)',
+    default = '.'
+)
 args = parser.parse_args()
 
 if not args.server:
@@ -122,6 +129,7 @@ totals = {
     'Asset Metadata': 0
 }
 totals_log = []
+run_started_at = time.monotonic()
 
 
 ####
@@ -129,9 +137,27 @@ totals_log = []
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(partial=True)
     sys.exit(0)
 
 
@@ -271,24 +297,26 @@ def get_vsphere_resources(client):
             print("Rerun with '--debug' to disable parallel processing and exit upon first error.")
 
 
-def output_results():
+def output_results(partial=False):
     """ Output results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for resource_type, resource_count in totals.items():
             csv_writer.writerow([resource_type, resource_count])
 
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for item in totals_log:
             csv_writer.writerow(item)
 
     # Summary
-    print(f"\nResults (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} (script version: {version})\n")
 
     print(f"{str(totals['Asset Metadata']).rjust(padding)} Asset Metadata [Hosts, Virtual Machines]")
 
@@ -300,11 +328,12 @@ def main():
 
     client = get_vsphere_client()
 
-    print(f"Getting Billable Resources for the vSphere Server {args.server} ...")
+    status_print(f"[SCAN] Starting vSphere scan of {args.server} ...")
     if args.cluster:
-        print(f"\nFiltering on Cluster: {args.cluster} ...")
+        print(f"Filtering on Cluster: {args.cluster} ...")
 
     get_vsphere_resources(client)
+    status_print("[DONE] vSphere scan complete.")
     output_results()
 
 ####

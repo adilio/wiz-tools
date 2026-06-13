@@ -8,8 +8,10 @@ import argparse
 import csv
 import inspect
 import os
+import re
 import signal
 import sys
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -85,6 +87,51 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-accounts',
+    dest = 'max_accounts',
+    help = 'Stop after scanning N accounts (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed accounts (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-account',
+    dest = 'start_after_account',
+    help = 'Skip accounts until after this account name, useful for resuming sorted --all scans',
+    default = None
+)
+parser.add_argument(
+    '--include-account-regex',
+    dest = 'include_account_regex',
+    help = 'Only scan accounts whose name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-account-regex',
+    dest = 'exclude_account_regex',
+    help = 'Skip accounts whose name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 # Required arguments are too complex for argparse when using both defaults and env vars.
@@ -118,6 +165,9 @@ if args.user_name and not args.pass_word:
     print("ERROR: Must specify both --username and --password")
     sys.exit(1)
 
+include_account_pattern = re.compile(args.include_account_regex) if args.include_account_regex else None
+exclude_account_pattern = re.compile(args.exclude_account_regex) if args.exclude_account_regex else None
+
 
 ####
 # Configuration and Globals
@@ -134,6 +184,7 @@ totals = {
 
 totals_log = []
 errors_log = []
+run_started_at = time.monotonic()
 
 
 ####
@@ -141,9 +192,41 @@ errors_log = []
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def account_matches_filters(account_name):
+    if include_account_pattern and not include_account_pattern.search(account_name):
+        return False
+    if exclude_account_pattern and exclude_account_pattern.search(account_name):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_account_names, last_database_names, partial=True)
     sys.exit(0)
 
 
@@ -198,69 +281,61 @@ def get_accounts(connection_params):
     return result
 
 
-def get_databases(connection_params, account):
+def get_databases(connection, account):
     """ Get Snowflake Databases in this Account """
     try:
-        connection_params['account'] = account
-        connection = snowflake.connector.connect(**connection_params)
         cursor = connection.cursor()
         # https://docs.snowflake.com/en/sql-reference/account-usage/databases
-        # cursor.execute("SELECT DATABASE_NAME FROM SNOWFLAKE.ACCOUNT_USAGE.DATABASES WHERE DELETED IS NULL AND TYPE NOT IN ('APPLICATION','IMPORTED DATABASE') ORDER BY DATABASE_NAME")
         cursor.execute("SELECT DATABASE_NAME,TYPE FROM SNOWFLAKE.ACCOUNT_USAGE.DATABASES WHERE DELETED IS NULL AND TYPE != 'IMPORTED DATABASE' ORDER BY DATABASE_NAME")
         result = cursor.fetchall()
+        cursor.close()
         verbose_print(result)
     except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex, connection_params['account'])
+        ex_str = str(ex)
+        if 'No active warehouse' in ex_str or '250001' in ex_str:
+            print()
+            print("ERROR: No active warehouse selected for this Snowflake session.")
+            print("       Specify a warehouse with --warehouse <WAREHOUSE_NAME> and retry.")
+            sys.exit(1)
+        error_print(ex, account)
         error_print("Error getting Snowflake Databases in this Account.")
         return []
-    cursor.close()
-    connection.close()
-    databases = []
-    for database in result:
-        databases.append(database)
-    return databases
+    return list(result)
 
 
-def get_schemas(connection_params, account, database):
+def get_schemas(connection, account, database):
     """ Get schemas in this Snowflake Database """
     try:
-        connection_params['account'] = account
-        connection = snowflake.connector.connect(**connection_params)
         cursor = connection.cursor()
         # https://docs.snowflake.com/en/sql-reference/info-schema/schemata
         safe_db = database.replace('"', '""')
         cursor.execute(f'SELECT CATALOG_NAME,SCHEMA_NAME,SCHEMA_OWNER,IS_TRANSIENT,IS_MANAGED_ACCESS FROM "{safe_db}".INFORMATION_SCHEMA.SCHEMATA ORDER BY SCHEMA_NAME')
         result = cursor.fetchall()
+        cursor.close()
         verbose_print(result)
     except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex, connection_params['account'])
+        error_print(ex, account)
         error_print("Error getting Snowflake Schemas in this Database.")
         return []
-    cursor.close()
-    connection.close()
-    schemas = []
-    for schema in result:
-        # Drop INFORMATION_SCHEMA as per Wiz Inventory.
-        if schema[1] == 'INFORMATION_SCHEMA':
-            continue
-        schemas.append(schema)
+    schemas = [schema for schema in result if schema[1] != 'INFORMATION_SCHEMA']
     schema_count = len(schemas)
-    if schema_count > 0  or args.verbose_mode:
+    if schema_count > 0 or args.verbose_mode:
         progress_print(resource_count=schema_count, resource_type='Snowflake Database Schemas', account=account, database=database)
         totals['Snowflake Database Schemas'] += schema_count
     return schemas
 
 
-def output_results(account_names, database_names):
+def output_results(account_names, database_names, partial=False):
     """ Output results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for resource_type, resource_count in totals.items():
             csv_writer.writerow([resource_type, resource_count])
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count', 'Account', 'Database'])
         for item in totals_log:
@@ -268,12 +343,15 @@ def output_results(account_names, database_names):
 
     # Error File
     if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
             for error in errors_log:
                 err_file.write(error + "\n")
 
     # Summary
-    print(f"\nResults across {len(database_names)} Snowflake Databases in {len(account_names)} Snowflake Accounts (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(database_names)} Snowflake Databases in {len(account_names)} Snowflake Accounts (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed accounts only.\n")
     print(f"{str(totals['Snowflake Database Schemas']).rjust(padding)} Snowflake Database Schemas")
     print(f"\nDetails written to {output_file} and {output_file_log}")
 
@@ -284,11 +362,13 @@ def output_results(account_names, database_names):
 
 def main():
     """ Calculon Compute! """
+    global last_account_names, last_database_names  # pylint: disable=global-statement
     account_names  = []
     database_names = []
 
     organization, account = args.account.split('-', 1)
-    connection_params= {'account': args.account, 'role': args.role, 'warehouse': args.warehouse}
+    connection_params= {'account': args.account, 'role': args.role, 'warehouse': args.warehouse,
+                        'login_timeout': 30, 'network_timeout': 60}
     # Support key-pair, token, and user/password authentication
     if args.private_key_file:
         connection_params['private_key_file'] = args.private_key_file
@@ -316,17 +396,61 @@ def main():
         account_names = [account]
     print()
 
+    last_account_names = []
+    last_database_names = []
+    past_start_after = not args.start_after_account
+    scanned_count = 0
     print("Getting Databases for each Snowflake Account ...")
     print()
 
-    for account_name in account_names:
-        organization_account_name = f"{organization}-{account_name}"
-        databases = get_databases(connection_params, organization_account_name)
-        for database in databases:
-            database_name = database[0]
-            database_names.append(database_name)
-            get_schemas(connection_params, organization_account_name, database_name)
-            print()
+    try:
+        for index, account_name in enumerate(account_names, start=1):
+            organization_account_name = f"{organization}-{account_name}"
+            if not past_start_after:
+                if account_name == args.start_after_account:
+                    past_start_after = True
+                else:
+                    status_print(f"[SKIP] Account {index}/{len(account_names)}: {organization_account_name} (before --start-after-account)")
+                continue
+            if not account_matches_filters(organization_account_name):
+                status_print(f"[SKIP] Account {index}/{len(account_names)}: {organization_account_name}")
+                continue
+            if max_runtime_reached():
+                status_print(f"[STOP] Max runtime of {args.max_run_minutes}m reached after {scanned_count} account(s).")
+                output_results(last_account_names, last_database_names, partial=True)
+                return
+            if args.max_accounts and scanned_count >= args.max_accounts:
+                status_print(f"[STOP] Reached --max-accounts {args.max_accounts}.")
+                output_results(last_account_names, last_database_names, partial=True)
+                return
+            status_print(f"[SCAN] Account {index}/{len(account_names)}: {organization_account_name}")
+            account_params = dict(connection_params)
+            account_params['account'] = organization_account_name
+            try:
+                connection = snowflake.connector.connect(**account_params)
+            except Exception as ex:  # pylint: disable=broad-exception-caught
+                error_print(ex, organization_account_name)
+                error_print("Error connecting to Snowflake Account. Skipping.")
+                continue
+            try:
+                databases = get_databases(connection, organization_account_name)
+                for database in databases:
+                    database_name = database[0]
+                    database_names.append(database_name)
+                    last_database_names.append(database_name)
+                    get_schemas(connection, organization_account_name, database_name)
+                    print()
+            finally:
+                connection.close()
+            status_print(f"[DONE] Account complete: {organization_account_name} ({len(databases)} database(s))")
+            last_account_names.append(account_name)
+            scanned_count += 1
+            if args.checkpoint_interval and scanned_count % args.checkpoint_interval == 0:
+                status_print(f"[CHECKPOINT] {scanned_count} account(s) complete.")
+                output_results(last_account_names, last_database_names, partial=True)
+    except Exception:
+        output_results(last_account_names, last_database_names, partial=True)
+        raise
 
     output_results(account_names, database_names)
 
@@ -335,5 +459,7 @@ def main():
 
 
 if __name__ == "__main__":
+    last_account_names = []
+    last_database_names = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

@@ -9,9 +9,11 @@ import concurrent.futures
 import csv
 import inspect
 import os
+import re
 import signal
 import sys
 import threading
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -138,6 +140,51 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-accounts',
+    dest = 'max_accounts',
+    help = 'Stop after scanning N accounts (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed accounts (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-account',
+    dest = 'start_after_account',
+    help = 'Skip accounts until after this account ID, useful for resuming sorted --all scans',
+    default = None
+)
+parser.add_argument(
+    '--include-account-regex',
+    dest = 'include_account_regex',
+    help = 'Only scan accounts whose ID or name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-account-regex',
+    dest = 'exclude_account_regex',
+    help = 'Skip accounts whose ID or name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 if args.max_lambda_versions < 0 or args.max_lambda_versions > 10:
@@ -150,6 +197,8 @@ if args.max_workers < 1 or args.max_workers > 255:
     print(f"ERROR: --max-workers {args.max_workers} out of range: [1 .. 255]")
     sys.exit(1)
 
+include_account_pattern = re.compile(args.include_account_regex) if args.include_account_regex else None
+exclude_account_pattern = re.compile(args.exclude_account_regex) if args.exclude_account_regex else None
 
 ####
 # Configuration and Globals
@@ -204,6 +253,7 @@ totals_log = []
 errors_log = []
 totals_lock = threading.Lock()
 log_lock = threading.Lock()
+run_started_at = time.monotonic()
 
 
 def add_total(key, value):
@@ -230,9 +280,42 @@ except Exception as ex0:  # pylint: disable=broad-exception-caught
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def account_matches_filters(account_id, account_name):
+    haystack = f"{account_id} {account_name}"
+    if include_account_pattern and not include_account_pattern.search(haystack):
+        return False
+    if exclude_account_pattern and exclude_account_pattern.search(haystack):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_accounts, partial=True)
     sys.exit(0)
 
 
@@ -1174,6 +1257,7 @@ def get_aws_dynamodb_tables(region, credentials, account):
 def get_aws_resources(account, current_account_id, root_account_id):
     """ Get billable resources """
     exceptions = 0
+    status_print(f"[SCAN] Account start: {account['Id']} ({account['Name']})")
     credentials = aws_get_credentials(account['Id'], current_account_id, root_account_id)
     verbose_print(f"credentials: {credentials}")
     if not credentials:
@@ -1256,62 +1340,72 @@ def get_aws_resources(account, current_account_id, root_account_id):
                 error_print(future.exception(), f"{account['Id']} task={futures[future]}")
         if failed_tasks:
             error_print(f"{failed_tasks} task(s) failed for account {account['Id']} {account['Name']}")
+    status_print(f"[DONE] Account complete: {account['Id']} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {failed_tasks} exception(s))")
 
 
-def output_results(accounts):
+def output_results(accounts, partial=False):
     """ Output results """
+    with totals_lock:
+        totals_snapshot = dict(totals)
+    with log_lock:
+        totals_log_snapshot = list(totals_log)
+        errors_log_snapshot = list(errors_log)
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8', newline='') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
-        for resource_type, resource_count in totals.items():
+        for resource_type, resource_count in totals_snapshot.items():
             csv_writer.writerow([resource_type, resource_count])
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count', 'Account', 'Region'])
-        for item in totals_log:
+        for item in totals_log_snapshot:
             csv_writer.writerow(item)
 
     # Error File
-    if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
-            for error in errors_log:
+    if errors_log_snapshot:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
+            for error in errors_log_snapshot:
                 err_file.write(error + "\n")
 
     # Summary
-    print(f"\nResults across {len(accounts)} AWS Accounts (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(accounts)} AWS Accounts (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed accounts only.\n")
 
     if enabled['Virtual Machines']:
-        print(f"{str(totals['Virtual Machines']).rjust(padding)} Virtual Machines [EC2, LightSail]")
+        print(f"{str(totals_snapshot['Virtual Machines']).rjust(padding)} Virtual Machines [EC2, LightSail]")
     if enabled['Container Hosts']:
-        print(f"{str(totals['Container Hosts']).rjust(padding)} Container Hosts [ECS, EKS]")
+        print(f"{str(totals_snapshot['Container Hosts']).rjust(padding)} Container Hosts [ECS, EKS]")
     if enabled['Serverless Functions']:
-        print(f"{str(totals['Serverless Functions']).rjust(padding)} Serverless Functions [Lambda]")
+        print(f"{str(totals_snapshot['Serverless Functions']).rjust(padding)} Serverless Functions [Lambda]")
     if enabled['Serverless Containers']:
-        print(f"{str(totals['Serverless Containers']).rjust(padding)} Serverless Containers [ECS and EKS Fargate, SageMaker Domains, SageMaker Endpoints]")
+        print(f"{str(totals_snapshot['Serverless Containers']).rjust(padding)} Serverless Containers [ECS and EKS Fargate, SageMaker Domains, SageMaker Endpoints]")
 
     if enabled['Data Buckets']:
         print()
-        print(f"{str(totals['Data Buckets']).rjust(padding)} Data Buckets (Public and Private) [S3]")
+        print(f"{str(totals_snapshot['Data Buckets']).rjust(padding)} Data Buckets (Public and Private) [S3]")
     if enabled['PaaS Databases']:
-        print(f"{str(totals['PaaS Databases']).rjust(padding)} PaaS Databases [DocumentDB, RDS, RedShift]")
+        print(f"{str(totals_snapshot['PaaS Databases']).rjust(padding)} PaaS Databases [DocumentDB, RDS, RedShift]")
     if enabled['Data Warehouses']:
-        print(f"{str(totals['Data Warehouses']).rjust(padding)} Data Warehouses [DynamoDB]")
+        print(f"{str(totals_snapshot['Data Warehouses']).rjust(padding)} Data Warehouses [DynamoDB]")
 
     if enabled['Non-OS Disks']:
         print()
-        print(f"{str(totals['Non-OS Disks']).rjust(padding)} Non-OS Disks [EC2, LightSail]")
+        print(f"{str(totals_snapshot['Non-OS Disks']).rjust(padding)} Non-OS Disks [EC2, LightSail]")
     if enabled['Registry Container Images']:
-        print(f"{str(totals['Registry Container Images']).rjust(padding)} Registry Container Images [ECR]")
+        print(f"{str(totals_snapshot['Registry Container Images']).rjust(padding)} Registry Container Images [ECR]")
 
     if enabled['Kubernetes Sensors']:
         print()
-        print(f"{str(totals['Kubernetes Sensors']).rjust(padding)} (Potential) Kubernetes Sensors")
+        print(f"{str(totals_snapshot['Kubernetes Sensors']).rjust(padding)} (Potential) Kubernetes Sensors")
     if enabled['Virtual Machine Sensors']:
-        print(f"{str(totals['Virtual Machine Sensors']).rjust(padding)} (Potential) Virtual Machine Sensors [Estimated from VM Platform *]")
+        print(f"{str(totals_snapshot['Virtual Machine Sensors']).rjust(padding)} (Potential) Virtual Machine Sensors [Estimated from VM Platform *]")
     if enabled['Serverless Container Sensors']:
-        print(f"{str(totals['Serverless Container Sensors']).rjust(padding)} (Potential) Serverless Container Sensors [ECS and EKS Fargate]")
+        print(f"{str(totals_snapshot['Serverless Container Sensors']).rjust(padding)} (Potential) Serverless Container Sensors [ECS and EKS Fargate]")
 
     if enabled['Virtual Machine Sensors']:
         print()
@@ -1326,13 +1420,14 @@ def output_results(accounts):
 
     print(f"\nDetails written to {output_file} and {output_file_log}")
 
-    if errors_log:
+    if errors_log_snapshot:
         print("\nExceptions occurred.")
         print(f"Review {error_log_file} or rerun with '--debug' to disable parallel processing and exit upon first error.")
 
 
 def main():
     """ Calculon Compute! """
+    global last_accounts  # pylint: disable=global-statement
     root_account_id = None
 
     print("Getting the current AWS Account")
@@ -1384,16 +1479,44 @@ def main():
         else:
             accounts = [{'Id': current_account_id, 'Name': current_account_id}]
 
-    print("\nGetting Billable Resources for each AWS Account ...")
-    for account in accounts:
-        print(f"\nScanning {account['Id']} - {account['Name']}")
-        get_aws_resources(account, current_account_id, root_account_id)
+    if args.start_after_account:
+        original_count = len(accounts)
+        accounts = [a for a in accounts if a['Id'] > args.start_after_account]
+        print(f"\n- Resuming after Account ID {args.start_after_account}; skipped {original_count - len(accounts)} accounts")
 
-    output_results(accounts)
+    if include_account_pattern or exclude_account_pattern:
+        accounts = [a for a in accounts if account_matches_filters(a['Id'], a['Name'])]
+        print(f"\n- After regex filters: {len(accounts)} accounts to scan")
+
+    if args.max_accounts:
+        print(f"\n- Limiting scan to {args.max_accounts} accounts")
+        accounts = accounts[:args.max_accounts]
+
+    accounts_completed = 0
+    last_accounts = []
+    print("\nGetting Billable Resources for each AWS Account ...")
+    try:
+        for index, account in enumerate(accounts, start=1):
+            if max_runtime_reached():
+                print(f"\nReached --max-run-minutes={args.max_run_minutes}. Writing partial results before exiting.")
+                output_results(last_accounts, partial=True)
+                return
+            status_print(f"Scanning account {index}/{len(accounts)}: {account['Id']} - {account['Name']}")
+            get_aws_resources(account, current_account_id, root_account_id)
+            last_accounts.append(account)
+            accounts_completed += 1
+            if args.checkpoint_interval and accounts_completed % args.checkpoint_interval == 0:
+                output_results(last_accounts, partial=True)
+    except Exception:
+        output_results(last_accounts, partial=True)
+        raise
+
+    output_results(last_accounts)
 
 
 ####
 
 if __name__ == "__main__":
+    last_accounts = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

@@ -9,10 +9,13 @@ import concurrent.futures
 import csv
 import inspect
 import os
+import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -157,6 +160,58 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--request-timeout',
+    dest = 'request_timeout',
+    help = 'Socket timeout in seconds for SDK requests (default: 60)',
+    type = int,
+    default = 60
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-subscriptions',
+    dest = 'max_subscriptions',
+    help = 'Stop after scanning N subscriptions (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed subscriptions (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-subscription',
+    dest = 'start_after_subscription',
+    help = 'Skip subscriptions until after this subscription ID, useful for resuming sorted --all scans',
+    default = None
+)
+parser.add_argument(
+    '--include-subscription-regex',
+    dest = 'include_subscription_regex',
+    help = 'Only scan subscriptions whose ID or name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-subscription-regex',
+    dest = 'exclude_subscription_regex',
+    help = 'Skip subscriptions whose ID or name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 if args.max_image_tags < 1 or args.max_image_tags > 1000:
@@ -166,6 +221,8 @@ if args.max_workers < 1 or args.max_workers > 255:
     print(f"ERROR: --max-workers {args.max_workers} out of range: [1 .. 255]")
     sys.exit(1)
 
+include_subscription_pattern = re.compile(args.include_subscription_regex) if args.include_subscription_regex else None
+exclude_subscription_pattern = re.compile(args.exclude_subscription_regex) if args.exclude_subscription_regex else None
 
 ####
 # Configuration and Globals
@@ -222,6 +279,7 @@ totals_log = []
 errors_log = []
 totals_lock = threading.Lock()
 log_lock = threading.Lock()
+run_started_at = time.monotonic()
 
 
 def add_total(key, value):
@@ -261,9 +319,42 @@ except Exception as ex0:  # pylint: disable=broad-exception-caught
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def subscription_matches_filters(subscription_id, subscription_name):
+    haystack = f"{subscription_id} {subscription_name}"
+    if include_subscription_pattern and not include_subscription_pattern.search(haystack):
+        return False
+    if exclude_subscription_pattern and exclude_subscription_pattern.search(haystack):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_subscriptions, partial=True)
     sys.exit(0)
 
 
@@ -973,6 +1064,8 @@ def get_azure_stack_hci_clusters(subscription):
 def get_azure_resources(subscription):
     """ Get billable resources """
     exceptions = 0
+    subscription_id = subscription.subscription_id
+    status_print(f"[SCAN] Subscription start: {subscription_id} ({subscription.display_name})")
     # If debug mode is disabled (default), run all functions concurrently with multithreading.
     # If debug mode is enabled, run all functions sequentially without multithreading.
     if args.debug_mode:
@@ -1024,63 +1117,73 @@ def get_azure_resources(subscription):
                 error_print(future.exception(), f"{subscription.display_name} task={futures[future]}")
         if failed_tasks:
             error_print(f"{failed_tasks} task(s) failed for subscription {subscription.display_name}")
+    status_print(f"[DONE] Subscription complete: {subscription_id} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {failed_tasks} exception(s))")
 
 
-def output_results(subscriptions):
+def output_results(subscriptions, partial=False):
     """ Output results """
+    with totals_lock:
+        totals_snapshot = dict(totals)
+    with log_lock:
+        totals_log_snapshot = list(totals_log)
+        errors_log_snapshot = list(errors_log)
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8', newline='') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
-        for resource_type, resource_count in totals.items():
+        for resource_type, resource_count in totals_snapshot.items():
             csv_writer.writerow([resource_type, resource_count])
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count', 'Subscription'])
-        for item in totals_log:
+        for item in totals_log_snapshot:
             csv_writer.writerow(item)
 
     # Error File
-    if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
-            for error in errors_log:
+    if errors_log_snapshot:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
+            for error in errors_log_snapshot:
                 err_file.write(error + "\n")
 
     # Summary
-    print(f"\nResults across {len(subscriptions)} Azure Subscriptions (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(subscriptions)} Azure Subscriptions (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed subscriptions only.\n")
 
     if enabled['Virtual Machines']:
-        print(f"{str(totals['Virtual Machines']).rjust(padding)} Virtual Machines [Compute, Scale Sets]")
+        print(f"{str(totals_snapshot['Virtual Machines']).rjust(padding)} Virtual Machines [Compute, Scale Sets]")
     if enabled['Container Hosts']:
-        print(f"{str(totals['Container Hosts']).rjust(padding)} Container Hosts [AKS]")
+        print(f"{str(totals_snapshot['Container Hosts']).rjust(padding)} Container Hosts [AKS]")
     if enabled['Serverless Functions']:
-        print(f"{str(totals['Serverless Functions']).rjust(padding)} Serverless Functions [Web Apps]")
+        print(f"{str(totals_snapshot['Serverless Functions']).rjust(padding)} Serverless Functions [Web Apps]")
     if enabled['Serverless Containers']:
-        print(f"{str(totals['Serverless Containers']).rjust(padding)} Serverless Containers [Container Instances, Container Apps]")
+        print(f"{str(totals_snapshot['Serverless Containers']).rjust(padding)} Serverless Containers [Container Instances, Container Apps]")
     if enabled['Asset Metadata']:
-        print(f"{str(totals['Asset Metadata']).rjust(padding)} Asset Metadata [Arc Machines, Stack HCI Clusters]")
+        print(f"{str(totals_snapshot['Asset Metadata']).rjust(padding)} Asset Metadata [Arc Machines, Stack HCI Clusters]")
 
     if enabled['Data Buckets']:
         print()
-        print(f"{str(totals['Data Buckets']).rjust(padding)} Data Buckets (Public and Private) [Storage Containers]")
+        print(f"{str(totals_snapshot['Data Buckets']).rjust(padding)} Data Buckets (Public and Private) [Storage Containers]")
     if enabled['PaaS Databases']:
-        print(f"{str(totals['PaaS Databases']).rjust(padding)} PaaS Databases [SQL]")
+        print(f"{str(totals_snapshot['PaaS Databases']).rjust(padding)} PaaS Databases [SQL]")
 
     if enabled['Non-OS Disks']:
         print()
-        print(f"{str(totals['Non-OS Disks']).rjust(padding)} Non-OS Disks [Compute]")
+        print(f"{str(totals_snapshot['Non-OS Disks']).rjust(padding)} Non-OS Disks [Compute]")
     if enabled['Registry Container Images']:
         print()
-        print(f"{str(totals['Registry Container Images']).rjust(padding)} Registry Container Images [ACR]")
+        print(f"{str(totals_snapshot['Registry Container Images']).rjust(padding)} Registry Container Images [ACR]")
 
     if enabled['Kubernetes Sensors']:
         print()
-        print(f"{str(totals['Kubernetes Sensors']).rjust(padding)} (Potential) Kubernetes Sensors [Estimated from Platform]")
+        print(f"{str(totals_snapshot['Kubernetes Sensors']).rjust(padding)} (Potential) Kubernetes Sensors [Estimated from Platform]")
     if enabled['Virtual Machine Sensors']:
-        print(f"{str(totals['Virtual Machine Sensors']).rjust(padding)} (Potential) Virtual Machine Sensors [Estimated from VM Platform *]")
+        print(f"{str(totals_snapshot['Virtual Machine Sensors']).rjust(padding)} (Potential) Virtual Machine Sensors [Estimated from VM Platform *]")
     if enabled['Serverless Container Sensors']:
-        print(f"{str(totals['Serverless Container Sensors']).rjust(padding)} (Potential) Serverless Container Sensors [Container Apps]")
+        print(f"{str(totals_snapshot['Serverless Container Sensors']).rjust(padding)} (Potential) Serverless Container Sensors [Container Apps]")
 
     if enabled['Virtual Machine Sensors']:
         print()
@@ -1095,13 +1198,15 @@ def output_results(subscriptions):
 
     print(f"\nDetails written to {output_file} and {output_file_log}")
 
-    if errors_log:
+    if errors_log_snapshot:
         print("\nExceptions occurred.")
         print(f"Review {error_log_file} or rerun with '--debug' to disable parallel processing and exit upon error.")
 
 
 def main():
     """ Calculon Compute! """
+    global last_subscriptions  # pylint: disable=global-statement
+    socket.setdefaulttimeout(args.request_timeout)
     subscriptions = []
 
     if args.all:
@@ -1129,18 +1234,46 @@ def main():
         print("Exiting...")
         sys.exit(1)
 
+    last_subscriptions = []
+    filtered_subscriptions = [s for s in subscriptions if s.display_name != 'Access to Azure Active Directory']
     print("\nGetting Billable Resources for each Azure Subscription ...")
-    for subscription in subscriptions:
-        if subscription.display_name == 'Access to Azure Active Directory':
-            # print(f"\nSkipping {subscription.display_name} (Classic Azure Portal Legacy Subscription) ...")
-            continue
-        subscription_id = subscription.id.rsplit('/', 1)[-1]
-        print(f"\nScanning {subscription_id} - {subscription.display_name} ...")
-        get_azure_resources(subscription)
+    past_start_after = not args.start_after_subscription
+    scanned_count = 0
+    try:
+        for index, subscription in enumerate(filtered_subscriptions, start=1):
+            subscription_id = subscription.id.rsplit('/', 1)[-1]
+            if not past_start_after:
+                if subscription_id == args.start_after_subscription:
+                    past_start_after = True
+                else:
+                    status_print(f"[SKIP] Subscription {index}/{len(filtered_subscriptions)}: {subscription_id} (before --start-after-subscription)")
+                continue
+            if not subscription_matches_filters(subscription_id, subscription.display_name):
+                status_print(f"[SKIP] Subscription {index}/{len(filtered_subscriptions)}: {subscription_id} - {subscription.display_name}")
+                continue
+            if max_runtime_reached():
+                status_print(f"[STOP] Max runtime of {args.max_run_minutes}m reached after {scanned_count} subscription(s).")
+                output_results(last_subscriptions, partial=True)
+                return
+            if args.max_subscriptions and scanned_count >= args.max_subscriptions:
+                status_print(f"[STOP] Reached --max-subscriptions {args.max_subscriptions}.")
+                output_results(last_subscriptions, partial=True)
+                return
+            status_print(f"[SCAN] Subscription {index}/{len(filtered_subscriptions)}: {subscription_id} - {subscription.display_name}")
+            get_azure_resources(subscription)
+            last_subscriptions.append(subscription)
+            scanned_count += 1
+            if args.checkpoint_interval and scanned_count % args.checkpoint_interval == 0:
+                status_print(f"[CHECKPOINT] {scanned_count} subscription(s) complete.")
+                output_results(last_subscriptions, partial=True)
+    except Exception:
+        output_results(last_subscriptions, partial=True)
+        raise
 
-    output_results(subscriptions)
+    output_results(last_subscriptions)
 
 
 if __name__ == "__main__":
+    last_subscriptions = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

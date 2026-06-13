@@ -104,7 +104,7 @@ footer a:hover{color:var(--accent);}
   <div class="hero">
     <div class="eyebrow">Code · Cloud · SaaS · Resource discovery</div>
     <h1>Wiz Sizing Scripts</h1>
-    <p class="lead">Organized copies of Wiz resource-discovery and sizing scripts for estimating billable units before connectors are enabled. The scripts live in the repository; gists are kept as instruction pages.</p>
+    <p class="lead">Field-hardened Wiz resource-discovery and sizing scripts for estimating billable units before connectors are enabled. All scripts have local improvements for reliability and operability; the scripts live in the repository and gists are kept as instruction pages.</p>
     <div class="tags">
       <span class="tag">sizing</span>
       <span class="tag">resource discovery</span>
@@ -152,9 +152,9 @@ footer a:hover{color:var(--accent);}
           <thead><tr><th>Platform</th><th>Status</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
           <tbody>
             <tr><td>Azure DevOps</td><td><code>modified</code></td><td><code>sizing-scripts/code/azure-devops/active-developer-count-ado.py</code></td><td><a href="https://gist.github.com/adilio/34bee443582f724a88a953f2b65e1695" target="_blank">Instructions</a></td></tr>
-            <tr><td>GitHub</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/github/active-developer-count-github.py</code></td><td><a href="https://gist.github.com/adilio/dcf9c6d8158f4bda24a5496e026bfa4d" target="_blank">Instructions</a></td></tr>
-            <tr><td>GitLab</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/gitlab/active-developer-count-gitlab.py</code></td><td><a href="https://gist.github.com/adilio/f2d0db7713f20fbec8e77b520d1ff0cf" target="_blank">Instructions</a></td></tr>
-            <tr><td>HCP Terraform</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/code/hcp-terraform/active-developer-count-hcp.py</code></td><td><a href="https://gist.github.com/adilio/172d8118782d96e4487ba7be70dd8cc0" target="_blank">Instructions</a></td></tr>
+            <tr><td>GitHub</td><td><code>modified</code></td><td><code>sizing-scripts/code/github/active-developer-count-github.py</code></td><td><a href="https://gist.github.com/adilio/dcf9c6d8158f4bda24a5496e026bfa4d" target="_blank">Instructions</a></td></tr>
+            <tr><td>GitLab</td><td><code>modified</code></td><td><code>sizing-scripts/code/gitlab/active-developer-count-gitlab.py</code></td><td><a href="https://gist.github.com/adilio/f2d0db7713f20fbec8e77b520d1ff0cf" target="_blank">Instructions</a></td></tr>
+            <tr><td>HCP Terraform</td><td><code>modified</code></td><td><code>sizing-scripts/code/hcp-terraform/active-developer-count-hcp.py</code></td><td><a href="https://gist.github.com/adilio/172d8118782d96e4487ba7be70dd8cc0" target="_blank">Instructions</a></td></tr>
           </tbody>
         </table>
         <h3>Typical Run</h3>
@@ -168,15 +168,15 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
         <table>
           <thead><tr><th>Platform</th><th>Status</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
           <tbody>
-            <tr><td>Alibaba Cloud</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/alibaba-cloud/resource-count-ali.py</code></td><td><a href="https://gist.github.com/adilio/1ed5885d2e2834556c9be9c6daa6ba99" target="_blank">Instructions</a></td></tr>
-            <tr><td>AWS</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/aws/resource-count-aws-v2.py</code></td><td><a href="https://gist.github.com/adilio/187c41935225d75100b5384eb814ec06" target="_blank">Instructions</a></td></tr>
-            <tr><td>AWS ASM</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/aws/asm-resource-count-aws.py</code></td><td><a href="https://gist.github.com/adilio/1e0bb1617cc4eec44906b463b931daf6" target="_blank">Instructions</a></td></tr>
-            <tr><td>Azure</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/azure/resource-count-azure-v2.py</code></td><td><a href="https://gist.github.com/adilio/e06c498f41bcc0ff4af76d1e0b3510cf" target="_blank">Instructions</a></td></tr>
+            <tr><td>Alibaba Cloud</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/alibaba-cloud/resource-count-ali.py</code></td><td><a href="https://gist.github.com/adilio/1ed5885d2e2834556c9be9c6daa6ba99" target="_blank">Instructions</a></td></tr>
+            <tr><td>AWS</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/aws/resource-count-aws-v2.py</code></td><td><a href="https://gist.github.com/adilio/187c41935225d75100b5384eb814ec06" target="_blank">Instructions</a></td></tr>
+            <tr><td>AWS ASM</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/aws/asm-resource-count-aws.py</code></td><td><a href="https://gist.github.com/adilio/1e0bb1617cc4eec44906b463b931daf6" target="_blank">Instructions</a></td></tr>
+            <tr><td>Azure</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/azure/resource-count-azure-v2.py</code></td><td><a href="https://gist.github.com/adilio/e06c498f41bcc0ff4af76d1e0b3510cf" target="_blank">Instructions</a></td></tr>
             <tr><td>GCP</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/gcp/resource-count-gcp-v2.py</code></td><td><a href="https://gist.github.com/adilio/f33a503a0d34d55441c2c87828bb5c66" target="_blank">Instructions</a></td></tr>
-            <tr><td>Linode</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/linode/resource-count-linode.py</code></td><td><a href="https://gist.github.com/adilio/8c4bc439955cff9533748bf9c0412080" target="_blank">Instructions</a></td></tr>
-            <tr><td>OCI</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/oci/resource-count-oci.py</code></td><td><a href="https://gist.github.com/adilio/0b8fe0449f3a0b76ed3291c7b9303b23" target="_blank">Instructions</a></td></tr>
-            <tr><td>Snowflake</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/snowflake/</code></td><td><a href="https://gist.github.com/adilio/7324ec1a7f59c211aae7593af977cc46" target="_blank">Instructions</a></td></tr>
-            <tr><td>VMware vSphere</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/cloud/vmware-vsphere/resource-count-vsphere.py</code></td><td><a href="https://gist.github.com/adilio/f846ba58dbe9d1497ca192d029d6c4f2" target="_blank">Instructions</a></td></tr>
+            <tr><td>Linode</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/linode/resource-count-linode.py</code></td><td><a href="https://gist.github.com/adilio/8c4bc439955cff9533748bf9c0412080" target="_blank">Instructions</a></td></tr>
+            <tr><td>OCI</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/oci/resource-count-oci.py</code></td><td><a href="https://gist.github.com/adilio/0b8fe0449f3a0b76ed3291c7b9303b23" target="_blank">Instructions</a></td></tr>
+            <tr><td>Snowflake</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/snowflake/</code></td><td><a href="https://gist.github.com/adilio/7324ec1a7f59c211aae7593af977cc46" target="_blank">Instructions</a></td></tr>
+            <tr><td>VMware vSphere</td><td><code>modified</code></td><td><code>sizing-scripts/cloud/vmware-vsphere/resource-count-vsphere.py</code></td><td><a href="https://gist.github.com/adilio/f846ba58dbe9d1497ca192d029d6c4f2" target="_blank">Instructions</a></td></tr>
           </tbody>
         </table>
         <h3>Common Flags</h3>
@@ -184,22 +184,117 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
           <li><code>--all</code> scans all accessible accounts, projects, or subscriptions where supported.</li>
           <li><code>--data</code> includes buckets and databases where supported.</li>
           <li><code>--images</code> includes registry container images where supported.</li>
+          <li><code>--output-dir</code> writes all CSV and log output to the specified directory (all scripts).</li>
+          <li><code>--max-run-minutes</code> stops scanning after N minutes and writes partial results (cloud scripts).</li>
+          <li><code>--checkpoint-interval</code> writes partial output every N accounts/subscriptions/compartments (cloud scripts).</li>
         </ul>
       </section>
 
       <section id="modified">
-        <h2>Modified Script Notes</h2>
-        <p>Scripts marked <code>modified</code> keep the original sizing intent, but include local hardening for field-reported runtime or reliability issues. The complete inventory is tracked in <code>sizing-scripts/SCRIPT_STATUS.md</code>.</p>
+        <h2>What Changed — All Scripts</h2>
+        <p>All scripts keep the original sizing intent. Every script received a common set of hardening improvements; cloud scripts with org-scale account lists also received scoping and resume flags. Script-specific correctness fixes are listed below.</p>
+
+        <h3>Universal Improvements (all 14 scripts)</h3>
+        <table>
+          <thead><tr><th>Improvement</th><th>What changed</th><th>Why it changed</th></tr></thead>
+          <tbody>
+            <tr><td>Elapsed-time progress</td><td>Adds <code>+MM:SS [SCAN]</code> / <code>[DONE]</code> status lines around each work unit. Code scripts add <code>--progress-interval</code>.</td><td>Operators cannot distinguish a slow scan from a hung one.</td></tr>
+            <tr><td>Partial output on Ctrl-C / failure</td><td>Signal handler writes partial results before exiting. Main loop wrapped in <code>try/except</code> to write partial results before re-raising.</td><td>A multi-hour scan interrupted at hour 4 previously wrote nothing.</td></tr>
+            <tr><td><code>--output-dir</code></td><td>All file writes routed through <code>output_path()</code>; <code>os.makedirs(exist_ok=True)</code> on first write.</td><td>Organizes output for pilots and parallel scans against multiple tenants.</td></tr>
+            <tr><td>Worker-thread exception logging</td><td>Threaded scripts log each failed worker with account/task name and exception text instead of silently counting it.</td><td>The old pattern hid all thread-level bugs — the primary silent-undercount mechanism.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Org-scale cloud scripts — scoping and resume flags</h3>
+        <p>AWS (both), Azure, OCI, Alibaba, and Snowflake now accept: <code>--max-run-minutes</code>, <code>--max-accounts</code> / <code>--max-subscriptions</code> / <code>--max-compartments</code>, <code>--checkpoint-interval</code>, <code>--start-after-account</code> (or subscription/compartment), <code>--include-*-regex</code>, <code>--exclude-*-regex</code>.</p>
+
+        <h3>AWS Standard — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>DocumentDB pagination called <code>describe_db_instances</code> on page 2+ then read <code>DBClusters</code> → <code>KeyError</code></td><td>Silent undercount in any account with more than 100 DocumentDB clusters.</td></tr>
+            <tr><td>Lightsail instances checked <code>PlatformDetails</code> (no such key); real key is <code>platform</code></td><td>Virtual Machine Sensors were always zero for Lightsail Linux instances.</td></tr>
+            <tr><td>EKS Fargate while-loop was dead code; if activated naively it would double-count pods</td><td>Replaced with a single-pass profile-existence check to prevent a latent double-count.</td></tr>
+            <tr><td>Thread-unsafe <code>totals[...] += n</code> from worker threads</td><td>Dict increment is not atomic; concurrent writes produce occasional miscounts.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Azure — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>AKS summed only <code>agent_pool_profiles[0]</code> (both SDK and <code>--graph</code> paths)</td><td>Multi-nodepool clusters were undercounted for Container Hosts and Kubernetes Sensors.</td></tr>
+            <tr><td><code>scale_sets</code> / <code>registries</code> unbound when the list call raised → silent <code>NameError</code> in worker thread</td><td>Prevented any count from a subscription where a list call failed.</td></tr>
+            <tr><td>No per-request timeout on SDK clients; added <code>--request-timeout</code> via <code>socket.setdefaulttimeout()</code></td><td>A hung socket stalled an entire subscription indefinitely.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>OCI — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>Shared config dict aliased (not copied) across parallel region threads writing <code>config['region']</code></td><td>Scans ran against whichever region the last thread wrote — silent miscounts across regions.</td></tr>
+            <tr><td><code>Oracle-Tags → CreatedBy</code> direct index killed the region thread on any instance missing that tag</td><td>Any instance without the tag dropped the entire region silently.</td></tr>
+            <tr><td>One <code>get_image</code> API call per instance; added module-level image OS cache</td><td>Fleets sharing a handful of images made thousands of redundant API calls.</td></tr>
+            <tr><td>Added <code>retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY</code> to all six client constructions</td><td>SDK default is no retries; transient errors were silently swallowed.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Alibaba Cloud — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>ACK pagination: <code>floor</code> instead of <code>ceil</code>, <code>&lt;</code> instead of <code>&lt;=</code>, <code>request.page_number(n)</code> call instead of <code>= n</code> assignment → <code>TypeError</code> after page 1</td><td>Any tenant with more than one page of ACK clusters silently undercounted Container Hosts and Kubernetes Sensors.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Snowflake — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td><code>split('-')</code> failed for accounts with hyphens in org/account name; validation boolean was inverted</td><td>Common <code>MYORG-MY-ACCOUNT</code> format failed at startup.</td></tr>
+            <tr><td>Database name interpolated unquoted into <code>INFORMATION_SCHEMA</code> query</td><td>Databases with lowercase or special-character names were silently skipped.</td></tr>
+            <tr><td>One connection opened per database call; now one connection per account with <code>login_timeout</code> / <code>network_timeout</code></td><td>Connection overhead multiplied with database count; connections were unclosed on error.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>GitHub — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>Rate-limit retry called <code>datetime.fromtimestamp()</code> on the module instead of <code>datetime.datetime.fromtimestamp(int(header))</code></td><td>Retry decorator crashed on every rate limit hit; failure was swallowed → silent undercount on large orgs.</td></tr>
+            <tr><td>90-day <code>since=</code> window used naive local time instead of UTC</td><td>Commits near the boundary were incorrectly included or excluded in non-UTC timezones.</td></tr>
+            <tr><td><code>if not repository: print(...)</code> without <code>sys.exit(1)</code> → continued to iterate <code>[None]</code></td><td>Bad repository reference produced a confusing crash instead of a clean exit.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>GitLab — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td><code>output_results()</code> referenced <code>args.pro</code> (typo) → <code>AttributeError</code> on every <code>--proj</code> run</td><td>Every project-scoped run lost its console summary and cross-VCS rollup after scanning.</td></tr>
+            <tr><td><code>if not group/project: print(...)</code> without <code>sys.exit(1)</code> → <code>None.projects</code> crash</td><td>Bad group or project name produced a confusing crash instead of a clean exit.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>HCP Terraform — correctness fixes</h3>
+        <table>
+          <thead><tr><th>Fix</th><th>Why it mattered</th></tr></thead>
+          <tbody>
+            <tr><td>Paginated API call looped forever on any non-200/429 response; added capped retries with backoff</td><td>A 401/403/500 hung the script indefinitely while spamming errors.</td></tr>
+            <tr><td><code>configuration_version['id']</code> on <code>{}</code> → <code>KeyError</code> terminated the whole scan with no output</td><td>Any workspace with an unavailable config version ended the run before writing results.</td></tr>
+          </tbody>
+        </table>
 
         <h3>Microsoft 365 Sizing Script</h3>
         <table>
           <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
           <tbody>
-            <tr><td>Temporary app lifecycle</td><td>Used a fixed temporary app name and cleaned up on the successful path</td><td>Creates a unique temporary Entra ID app by default and removes it from a <code>finally</code> block</td><td>Reduces risk of reusing or leaving behind the temporary app during failed runs</td></tr>
-            <tr><td>Cloud Shell sign-in</td><td>Used normal Microsoft Graph sign-in</td><td>Uses device-code authentication by default</td><td>Improves reliability in Azure Cloud Shell</td></tr>
-            <tr><td>Long-running scans</td><td>Used one app-only access token before scanning</td><td>Tracks expiry and refreshes app-only Graph tokens before they expire</td><td>Prevents large tenants from failing after an hour because the token expired</td></tr>
-            <tr><td>Graph calls</td><td>Retried throttling and API errors, then could stop without a clear final failure</td><td>Honors retry guidance and reports clear partial counts before cleanup if the scan fails</td><td>Prevents incomplete counts from looking like successful final results</td></tr>
-            <tr><td>Output compatibility</td><td>Printed the original <code>FINAL COUNTS</code> block</td><td>Keeps the same final block while adding elapsed progress and status lines</td><td>Preserves existing runbooks while making long runs easier to monitor</td></tr>
+            <tr><td>Temporary app lifecycle</td><td>Fixed app name; cleaned up on the successful path</td><td>Unique app name by default; cleanup in a <code>finally</code> block</td><td>Reduces risk of reusing or leaving behind the temporary app during failed runs</td></tr>
+            <tr><td>Cloud Shell sign-in</td><td>Normal Microsoft Graph sign-in</td><td>Device-code authentication by default</td><td>Improves reliability in Azure Cloud Shell</td></tr>
+            <tr><td>Long-running scans</td><td>One app-only access token before scanning</td><td>Tracks expiry and refreshes tokens before they expire</td><td>Prevents large tenants from failing after an hour</td></tr>
+            <tr><td>Graph calls</td><td>Retried then could stop without a clear final failure</td><td>Honors retry guidance; reports partial counts before cleanup on failure</td><td>Prevents incomplete counts from looking like successful results</td></tr>
+            <tr><td>Output compatibility</td><td>Original <code>FINAL COUNTS</code> block</td><td>Same block plus elapsed progress and status lines</td><td>Preserves existing runbooks while making long runs easier to monitor</td></tr>
           </tbody>
         </table>
 
@@ -207,13 +302,10 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
         <table>
           <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
           <tbody>
-            <tr><td>Repository loop</td><td>Accumulated repositories across projects and then looped over the full accumulated list for each project</td><td>Scans only the repositories returned for the current project</td><td>Prevents repeated rescans that can make large organizations look like they are running indefinitely</td></tr>
-            <tr><td>Project and commit retrieval</td><td>Requested projects and commits without explicit operator-visible paging controls</td><td>Adds paged project retrieval and paged commit retrieval with <code>--project-page-size</code> and <code>--commit-page-size</code></td><td>Improves behavior in large organizations and repositories while making API work more visible</td></tr>
-            <tr><td>Runtime visibility</td><td>Printed repository and developer discoveries but no elapsed progress cadence</td><td>Adds elapsed status lines and <code>--progress-interval</code></td><td>Helps operators distinguish slow progress from a hung scan</td></tr>
-            <tr><td>Guardrails</td><td>No built-in cap for repositories, commits, or wall-clock runtime during troubleshooting</td><td>Adds <code>--max-repositories</code>, <code>--max-commits-per-repo</code>, and <code>--max-run-minutes</code></td><td>Allows safe pilots before committing to a full organization scan</td></tr>
-            <tr><td>Interruption and checkpoints</td><td>Ctrl-C exited without writing partial results</td><td>Writes partial outputs before exit; optional checkpoint outputs are available with <code>--checkpoint-interval</code></td><td>Preserves useful counts from long-running scans without changing normal-run output too much</td></tr>
-            <tr><td>API reliability</td><td>API errors were logged or skipped without retry/backoff controls</td><td>Adds <code>--max-retries</code>, <code>--retry-delay</code>, detailed error context, and <code>--fail-fast</code></td><td>Handles transient Azure DevOps failures and continues scanning remaining repositories by default while preserving a strict troubleshooting mode</td></tr>
-            <tr><td>Privacy option</td><td>Developer email addresses were printed to the terminal</td><td>Keeps that default for compatibility; <code>--mask-emails</code> opts into terminal masking</td><td>Preserves familiar output while adding a safer screen-share mode</td></tr>
+            <tr><td>Repository loop</td><td>Accumulated repositories across projects and rescanned the full list each project</td><td>Scans only the repositories for the current project</td><td>Prevents repeated rescans that made large orgs appear to run indefinitely</td></tr>
+            <tr><td>Pagination</td><td>No operator-visible paging controls</td><td>Adds <code>--project-page-size</code> and <code>--commit-page-size</code></td><td>Improves large-org behavior and makes API work visible</td></tr>
+            <tr><td>Guardrails</td><td>No cap for repositories, commits, or runtime</td><td>Adds <code>--max-repositories</code>, <code>--max-commits-per-repo</code>, <code>--max-run-minutes</code></td><td>Allows safe pilots before committing to a full org scan</td></tr>
+            <tr><td>API reliability</td><td>Errors logged or skipped without retry/backoff</td><td>Adds <code>--max-retries</code>, <code>--retry-delay</code>, detailed error context, and <code>--fail-fast</code></td><td>Handles transient failures while preserving a strict troubleshooting mode</td></tr>
           </tbody>
         </table>
 
@@ -221,13 +313,10 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
         <table>
           <thead><tr><th>Area</th><th>Original behavior</th><th>Updated behavior</th><th>Why it changed</th></tr></thead>
           <tbody>
-            <tr><td>Data workload default</td><td>Data counters were enabled internally even when <code>--data</code> was not supplied</td><td>Data buckets, PaaS databases, data warehouses, and non-OS disks now require <code>--data</code></td><td>Aligns runtime behavior with documented flags and shortens default discovery</td></tr>
-            <tr><td>Project scope</td><td><code>--all</code> scanned every accessible project</td><td>Adds <code>--max-projects</code>, <code>--include-project-regex</code>, and <code>--exclude-project-regex</code></td><td>Lets operators pilot or exclude noisy project families such as Apps Script-associated projects</td></tr>
-            <tr><td>Resume behavior</td><td>Long scans had to restart from the beginning after interruption</td><td>Adds <code>--start-after-project</code> for sorted project lists</td><td>Supports practical continuation after the last completed project</td></tr>
-            <tr><td>API guardrails</td><td>Paginated API calls could continue until the service finished or failed</td><td>Adds <code>--request-timeout</code>, <code>--max-pages-per-request</code>, and <code>--max-run-minutes</code></td><td>Bounds problematic calls and records partial data rather than silently running for many hours</td></tr>
-            <tr><td>Partial output</td><td>CSV output was written after the full scan</td><td>Writes partial CSV output on interruption, bounded-run exit, and optional <code>--checkpoint-interval</code> checkpoints</td><td>Preserves useful inventory from long scans that crash or are stopped without changing normal-run output too much</td></tr>
-            <tr><td>Failure isolation</td><td>A project-level failure could stop the full scan</td><td>Logs project and resource failures with detailed context and continues with remaining projects and resource types where possible</td><td>Allows partial tenant inventory collection even when one API family or project is problematic</td></tr>
-            <tr><td>Alternative collection</td><td>No explicit fallback path for customers unable to run a full scan</td><td>Adds <code>--inventory-instructions</code> with Cloud Asset Inventory guidance</td><td>Gives customers a lower-friction way to provide counts when API scanning is too expensive</td></tr>
+            <tr><td>Project scope</td><td><code>--all</code> scanned every accessible project</td><td>Adds <code>--max-projects</code>, <code>--include-project-regex</code>, <code>--exclude-project-regex</code>, <code>--start-after-project</code></td><td>Pilots, noisy-project exclusion, and resume without restarting</td></tr>
+            <tr><td>API guardrails</td><td>Pagination ran until the service finished or failed</td><td>Adds <code>--request-timeout</code>, <code>--max-pages-per-request</code>, and <code>--max-run-minutes</code></td><td>Bounds problematic calls and records partial data</td></tr>
+            <tr><td>Failure isolation</td><td>A project failure could stop the full scan</td><td>Logs failures with context and continues remaining projects and resource types</td><td>Allows partial inventory even when one API family or project is problematic</td></tr>
+            <tr><td>Alternative collection</td><td>No explicit fallback path</td><td>Adds <code>--inventory-instructions</code> with Cloud Asset Inventory guidance</td><td>Lower-friction path when direct API scanning is too expensive</td></tr>
           </tbody>
         </table>
       </section>
@@ -260,7 +349,7 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
       <a href="#m365">Microsoft 365</a>
       <a href="#code">Code scripts</a>
       <a href="#cloud">Cloud scripts</a>
-      <a href="#modified">Modified scripts</a>
+      <a href="#modified">What changed</a>
       <a href="#saas">SaaS scripts</a>
       <a href="#repo-layout">Repo layout</a>
     </aside>

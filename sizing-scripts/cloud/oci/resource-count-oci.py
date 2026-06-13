@@ -12,9 +12,11 @@ import csv
 import inspect
 import json
 import os
+import re
 import signal
 import sys
 import threading
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -65,11 +67,59 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-compartments',
+    dest = 'max_compartments',
+    help = 'Stop after scanning N compartments (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed compartments (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-compartment',
+    dest = 'start_after_compartment',
+    help = 'Skip compartments until after this compartment ID, useful for resuming sorted scans',
+    default = None
+)
+parser.add_argument(
+    '--include-compartment-regex',
+    dest = 'include_compartment_regex',
+    help = 'Only scan compartments whose ID or name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-compartment-regex',
+    dest = 'exclude_compartment_regex',
+    help = 'Skip compartments whose ID or name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 if args.max_workers < 1 or args.max_workers > 255:
     print(f"ERROR: --max-workers {args.max_workers} out of range: [1 .. 255]")
     sys.exit(1)
+
+include_compartment_pattern = re.compile(args.include_compartment_regex) if args.include_compartment_regex else None
+exclude_compartment_pattern = re.compile(args.exclude_compartment_regex) if args.exclude_compartment_regex else None
 
 
 ####
@@ -112,6 +162,7 @@ errors_log = []
 
 _image_os_cache = {}
 _image_os_cache_lock = threading.Lock()
+run_started_at = time.monotonic()
 
 
 ####
@@ -119,9 +170,42 @@ _image_os_cache_lock = threading.Lock()
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def compartment_matches_filters(compartment_id, compartment_name):
+    haystack = f"{compartment_id} {compartment_name}"
+    if include_compartment_pattern and not include_compartment_pattern.search(haystack):
+        return False
+    if exclude_compartment_pattern and exclude_compartment_pattern.search(haystack):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_compartments, partial=True)
     sys.exit(0)
 
 
@@ -165,7 +249,7 @@ def get_oci_compartments(config, signer):
     """ Get a list of OCI Compartments """
     try:
         compartments = []
-        identity_client = oci.identity.IdentityClient(config=config, signer=signer)
+        identity_client = oci.identity.IdentityClient(config=config, signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
         get_compartment_response = identity_client.get_compartment(compartment_id=config['tenancy'])
         root_compartment = json.loads(str(get_compartment_response.data))
         root_compartment['compartment_id'] = root_compartment['id']
@@ -190,7 +274,7 @@ def get_oci_compartments(config, signer):
 def get_oci_regions(config, signer):
     """ Get a list of OCI Regions """
     try:
-        identity_client = oci.identity.IdentityClient(config, signer=signer)
+        identity_client = oci.identity.IdentityClient(config=config, signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
         list_regions_response = identity_client.list_region_subscriptions(tenancy_id=config['tenancy'])
         regions = json.loads(str(list_regions_response.data))
     except Exception as ex:  # pylint: disable=broad-exception-caught
@@ -220,7 +304,7 @@ def get_oci_instances_and_oke_instances(config, signer, compartment, regions):
         container_instances_count = 0
         linux_instances_count = 0
         try:
-            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer)
+            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
             response = search_client.search_resources(
                 oci.resource_search.models.StructuredSearchDetails(
                     type="Structured",
@@ -239,7 +323,7 @@ def get_oci_instances_and_oke_instances(config, signer, compartment, regions):
                 instances.extend(json.loads(str(response.data))['items'])
         except Exception as ex:  # pylint: disable=broad-exception-caught
             error_print(f"Exception getting Instances in Region: {region}: {ex}", compartment['id'])
-        core_client = oci.core.ComputeClient(config=config_for_region(config, region), signer=signer)
+        core_client = oci.core.ComputeClient(config=config_for_region(config, region), signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
         for instance in instances:
             verbose_print(f"virtual_machine: {instance}")
             instances_count += 1
@@ -285,7 +369,7 @@ def get_oci_cloud_functions_function(config, signer, compartment, regions):
     for region in regions:
         serverless_functions_count = 0
         try:
-            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer)
+            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
             query_text = f"query functionsfunction resources where compartmentId = '{compartment['id']}' && lifeCycleState != 'DELETED' && lifeCycleState != 'DELETING'"
             response = search_client.search_resources(
                 oci.resource_search.models.StructuredSearchDetails(
@@ -317,7 +401,7 @@ def get_oci_buckets(config, signer, compartment, regions):
     for region in regions:
         buckets_count = 0
         try:
-            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer)
+            search_client = oci.resource_search.ResourceSearchClient(config=config_for_region(config, region), signer=signer, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
             response = search_client.search_resources(
                 oci.resource_search.models.StructuredSearchDetails(
                     type="Structured",
@@ -350,6 +434,7 @@ def get_oci_buckets(config, signer, compartment, regions):
 def get_oci_resources(config, signer, compartment, regions):
     """ Get billable resources """
     exceptions = 0
+    status_print(f"[SCAN] Compartment start: {compartment['id']} ({compartment['name']})")
     # If debug mode is disabled (default), run all functions concurrently with multithreading.
     # If debug mode is enabled, run all functions sequentially without multithreading.
     if args.debug_mode:
@@ -375,18 +460,20 @@ def get_oci_resources(config, signer, compartment, regions):
                 error_print(future.exception(), f"{compartment['id']} task={futures[future]}")
         if failed_tasks:
             error_print(f"{failed_tasks} task(s) failed for compartment {compartment['id']}")
+    status_print(f"[DONE] Compartment complete: {compartment['id']} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {failed_tasks} exception(s))")
 
 
-def output_results(compartments):
+def output_results(compartments, partial=False):
     """ Output results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8', newline='') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for resource_type, resource_count in totals.items():
             csv_writer.writerow([resource_type, resource_count])
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count', 'Region'])
         for item in totals_log:
@@ -394,12 +481,15 @@ def output_results(compartments):
 
     # Error File
     if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
             for error in errors_log:
                 err_file.write(error + "\n")
 
     # Summary
-    print(f"\nResults across {len(compartments)} OCI Compartments (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(compartments)} OCI Compartments (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed compartments only.\n")
 
     if enabled['Virtual Machines']:
         print(f"{str(totals['Virtual Machines']).rjust(padding)} Virtual Machines [Compute Instances]")
@@ -434,6 +524,7 @@ def output_results(compartments):
 
 def main():
     """ Calculon Compute! """
+    global last_compartments  # pylint: disable=global-statement
     try:
         config = oci.config.from_file(oci.config.DEFAULT_LOCATION, oci.config.DEFAULT_PROFILE)
         verbose_print(f"configuration: {config} from {oci.config.DEFAULT_LOCATION} using {oci.config.DEFAULT_PROFILE} profile")
@@ -477,14 +568,46 @@ def main():
     for compartment in compartments:
         print(f"- {compartment['id']} - {compartment['name']}")
 
+    last_compartments = []
+    past_start_after = not args.start_after_compartment
+    scanned_count = 0
     print("\nGetting Billable Resources for each OCI Compartment ...")
-    for compartment in compartments:
-        print(f"\nScanning {compartment['id']} - {compartment['name']}")
-        get_oci_resources(config, signer, compartment, regions)
+    try:
+        for index, compartment in enumerate(compartments, start=1):
+            compartment_id = compartment['id']
+            compartment_name = compartment['name']
+            if not past_start_after:
+                if compartment_id == args.start_after_compartment:
+                    past_start_after = True
+                else:
+                    status_print(f"[SKIP] Compartment {index}/{len(compartments)}: {compartment_id} (before --start-after-compartment)")
+                continue
+            if not compartment_matches_filters(compartment_id, compartment_name):
+                status_print(f"[SKIP] Compartment {index}/{len(compartments)}: {compartment_id} - {compartment_name}")
+                continue
+            if max_runtime_reached():
+                status_print(f"[STOP] Max runtime of {args.max_run_minutes}m reached after {scanned_count} compartment(s).")
+                output_results(last_compartments, partial=True)
+                return
+            if args.max_compartments and scanned_count >= args.max_compartments:
+                status_print(f"[STOP] Reached --max-compartments {args.max_compartments}.")
+                output_results(last_compartments, partial=True)
+                return
+            status_print(f"[SCAN] Compartment {index}/{len(compartments)}: {compartment_id} - {compartment_name}")
+            get_oci_resources(config, signer, compartment, regions)
+            last_compartments.append(compartment)
+            scanned_count += 1
+            if args.checkpoint_interval and scanned_count % args.checkpoint_interval == 0:
+                status_print(f"[CHECKPOINT] {scanned_count} compartment(s) complete.")
+                output_results(last_compartments, partial=True)
+    except Exception:
+        output_results(last_compartments, partial=True)
+        raise
 
-    output_results(compartments)
+    output_results(last_compartments)
 
 
 if __name__ == "__main__":
+    last_compartments = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

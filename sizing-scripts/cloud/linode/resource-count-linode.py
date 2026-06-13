@@ -12,6 +12,7 @@ import os
 import re
 import signal
 import sys
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -59,6 +60,12 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV files (default: current directory)',
+    default = '.'
+)
 
 args = parser.parse_args()
 
@@ -70,11 +77,14 @@ args = parser.parse_args()
 
 output_file     = 'linode-resources.csv'
 output_file_log = 'linode-resources-log.csv'
+error_log_file  = 'linode-errors-log.txt'
 padding = 6
 totals = {
     'Asset Metadata': 0
 }
 totals_log = []
+errors_log = []
+run_started_at = time.monotonic()
 
 
 ####
@@ -82,9 +92,27 @@ totals_log = []
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(partial=True)
     sys.exit(0)
 
 
@@ -108,7 +136,12 @@ def error_print(details):
         function = f"{inspect.stack()[1].function}()"
     except Exception:  # pylint: disable=broad-exception-caught
         function = ''
+    try:
+        details = str(details).replace("\n", " ").replace("\r", " ")
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
     print(f"\nERROR: {function} {details}\n")
+    errors_log.append(f"ERROR: {function} {details}")
 
 
 ####
@@ -210,46 +243,13 @@ def get_linode_instances(client):
         else:
             instances_count += 1
 
-    if instances_count > 0 or args.debug_mode:
+    if instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=instances_count, resource_type='Asset Metadata [Linodes]')
         totals['Asset Metadata'] += instances_count
 
-    if container_instances_count > 0 or args.debug_mode:
+    if container_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=container_instances_count, resource_type='Asset Metadata [Linodes LKE]')
         totals['Asset Metadata'] += container_instances_count
-
-
-# Virtual Machines: LKE Linodes (Asset Metadata)
-
-# ALT:
-# This also counts LKE Linodes, but cannot count Non-OS Disks (aka Volumes).
-# Volumes cannot be created by default when creating LKE Clusters, but can be added to existing LKE Cluster Nodes.
-
-def get_linode_lke_instances(client):
-    """ Get Linode LKE Instances """
-    container_instances_count = 0
-    try:
-        clusters = client.lke.clusters()
-    except ApiError as ex:
-        api_error_print(ex, 'Kubernetes')
-        return
-    except Exception as ex:  # pylint: disable=broad-exception-caught
-        error_print(ex)
-        error_print('Error getting Linode LKE Instances.')
-        return
-    for cluster in clusters:
-        verbose_print(f"cluster: {cluster.id} ({cluster.label})")
-        pools = cluster.pools
-        for pool in pools:
-            verbose_print(f"pool: {pool.id}")
-            nodes = pool.nodes
-            for node in nodes:
-                verbose_print(f"node: {node.id}")
-                container_instances_count += 1
-
-    if container_instances_count > 0 or args.debug_mode:
-        progress_print(resource_count=container_instances_count, resource_type='ALT Asset Metadata [Linodes LKE]')
-        totals['ALT Asset Metadata'] +=  container_instances_count
 
 
 # Data Buckets: Object Storage Buckets (Asset Metadata)
@@ -271,7 +271,7 @@ def get_linode_buckets(client):
         verbose_print(f"bucket: {bucket}")
         buckets_count += 1
 
-    if buckets_count > 0 or args.debug_mode:
+    if buckets_count > 0 or args.verbose_mode:
         progress_print(resource_count=buckets_count, resource_type='Asset Metadata [Object Storage Buckets]')
         totals['Asset Metadata'] += buckets_count
 
@@ -320,7 +320,7 @@ def get_linode_databases(client):
         error_print(ex)
         error_print('Error getting Linode Databases.')
 
-    if database_instances_count > 0 or args.debug_mode:
+    if database_instances_count > 0 or args.verbose_mode:
         progress_print(resource_count=database_instances_count, resource_type='Asset Metadata [Databases: MongoDB, MySQL, PostgreSQL]')
         totals['Asset Metadata'] += database_instances_count
 
@@ -335,7 +335,7 @@ def get_linode_resources(client):
     exceptions = 0
     # If debug mode is disabled (default), run all functions concurrently with multithreading.
     # If debug mode is enabled, run all functions sequentially without multithreading.
-    if args.debug_mode:
+    if args.verbose_mode:
         get_linode_instances(client=client)
         get_linode_buckets(client=client)
         get_linode_databases(client=client)
@@ -352,28 +352,40 @@ def get_linode_resources(client):
             print("\nExceptions occurred.")
             print("Rerun with '--debug' to disable parallel processing and exit upon first error.")
 
-def output_results():
+def output_results(partial=False):
     """ Output results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for resource_type, resource_count in totals.items():
             csv_writer.writerow([resource_type, resource_count])
 
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for item in totals_log:
             csv_writer.writerow(item)
 
+    # Error File
+    if errors_log:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
+            for error in errors_log:
+                err_file.write(error + "\n")
+
     # Summary
-    print(f"\nResults (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} (script version: {version})\n")
 
     print(f"{str(totals['Asset Metadata']).rjust(padding)} Asset Metadata [Linodes, LKE Linodes, Object Storage Buckets, MongoDB, MySQL, PostgreSQL Databases]")
 
     print(f"\nDetails written to {output_file}")
+
+    if errors_log:
+        print("\nExceptions occurred.")
+        print(f"Review {error_log_file} for error details.")
 
 
 def main():
@@ -386,8 +398,9 @@ def main():
 
     print(f"\nFound Account:\n- {account['ID']}")
 
-    print("\nGetting Billable Resources for the current Linode Account ...")
+    status_print("[SCAN] Starting Linode account scan ...")
     get_linode_resources(client)
+    status_print("[DONE] Linode account scan complete.")
 
     output_results()
 

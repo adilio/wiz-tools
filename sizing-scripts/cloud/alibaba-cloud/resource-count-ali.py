@@ -11,8 +11,10 @@ import inspect
 import json
 import math
 import os
+import re
 import signal
 import sys
+import time
 import warnings
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
@@ -105,11 +107,59 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-accounts',
+    dest = 'max_accounts',
+    help = 'Stop after scanning N accounts (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed accounts (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-account',
+    dest = 'start_after_account',
+    help = 'Skip accounts until after this account ID, useful for resuming sorted --all scans',
+    default = None
+)
+parser.add_argument(
+    '--include-account-regex',
+    dest = 'include_account_regex',
+    help = 'Only scan accounts whose ID or name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-account-regex',
+    dest = 'exclude_account_regex',
+    help = 'Skip accounts whose ID or name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 if args.max_workers < 1 or args.max_workers > 255:
     print(f"ERROR: --max-workers {args.max_workers} out of range: [1 .. 255]")
     sys.exit(1)
+
+include_account_pattern = re.compile(args.include_account_regex) if args.include_account_regex else None
+exclude_account_pattern = re.compile(args.exclude_account_regex) if args.exclude_account_regex else None
 
 
 ####
@@ -141,15 +191,49 @@ totals = {
 
 totals_log = []
 errors_log = []
+run_started_at = time.monotonic()
 
 ####
 # Common Library Code
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def account_matches_filters(account_id, account_name=''):
+    haystack = f"{account_id} {account_name}"
+    if include_account_pattern and not include_account_pattern.search(haystack):
+        return False
+    if exclude_account_pattern and exclude_account_pattern.search(haystack):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_accounts, partial=True)
     sys.exit(0)
 
 
@@ -565,6 +649,8 @@ def get_ali_cluster_instances(account=None, region_id=None, role_arn=None):
 def get_ali_resources(account=None, assumed_role_client=None, role_arn=None):
     """ Get billable resources for the specified Account """
     exceptions = 0
+    account_id = account['AccountId'] if account else 'default'
+    status_print(f"[SCAN] Account start: {account_id}")
     ecs_regions_list = get_ali_regions_via_ecs(account=account, assumed_role_client=assumed_role_client)
 
     if os.environ.get('ALI_DEV'):
@@ -596,18 +682,20 @@ def get_ali_resources(account=None, assumed_role_client=None, role_arn=None):
         for future in concurrent.futures.as_completed(futures):
             if future.exception():
                 exceptions += 1
+    status_print(f"[DONE] Account complete: {account_id} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {exceptions} exception(s))")
 
 
-def output_results(accounts):
+def output_results(accounts, partial=False):
     """ Output results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Summary File
-    with open(output_file, 'w', encoding='utf-8', newline='') as csv_file:
+    with open(output_path(output_file), 'w', encoding='utf-8', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count'])
         for resource_type, resource_count in totals.items():
             csv_writer.writerow([resource_type, resource_count])
     # Log File
-    with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Resource Type', 'Resource Count', 'Project', 'Region'])
         for item in totals_log:
@@ -615,12 +703,15 @@ def output_results(accounts):
 
     # Error File
     if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
             for error in errors_log:
                 err_file.write(error + "\n")
 
     # Summary
-    print(f"\nResults across {len(accounts)} Alibaba Accounts (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(accounts)} Alibaba Accounts (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed accounts only.\n")
 
     if enabled['Virtual Machines']:
         print(f"{str(totals['Virtual Machines']).rjust(padding)} Virtual Machines [ECS]")
@@ -650,6 +741,7 @@ def output_results(accounts):
 
 def main():
     """ Calculon Compute! """
+    global last_accounts  # pylint: disable=global-statement
     accounts = []
     org_assumed_role_client = None
     org_role_arn            = None
@@ -682,17 +774,49 @@ def main():
         print(f"\nFound Account:\n\n-- {current_account['AccountId']}")
         accounts = [current_account]
 
+    last_accounts = []
+    past_start_after = not args.start_after_account
+    scanned_count = 0
     print("\nGetting Billable Resources for the each Alibaba Account ...")
-    for account in accounts:
-        if os.environ.get('ALI_DEV'):
-            if account['AccountId'] != os.environ.get('ALI_DEV'):
-                print(f"\nSkipping {account['AccountId']} while in ALI_DEV mode\n")
+    try:
+        for index, account in enumerate(accounts, start=1):
+            account_id = account['AccountId']
+            account_name = account.get('DisplayName', '')
+            if os.environ.get('ALI_DEV') and account_id != os.environ.get('ALI_DEV'):
+                print(f"\nSkipping {account_id} while in ALI_DEV mode\n")
                 continue
-        print(f"\nScanning {account['AccountId']}\n")
-        get_ali_resources(account=account, assumed_role_client=org_assumed_role_client, role_arn=org_role_arn)
-    output_results(accounts)
+            if not past_start_after:
+                if account_id == args.start_after_account:
+                    past_start_after = True
+                else:
+                    status_print(f"[SKIP] Account {index}/{len(accounts)}: {account_id} (before --start-after-account)")
+                continue
+            if not account_matches_filters(account_id, account_name):
+                status_print(f"[SKIP] Account {index}/{len(accounts)}: {account_id} - {account_name}")
+                continue
+            if max_runtime_reached():
+                status_print(f"[STOP] Max runtime of {args.max_run_minutes}m reached after {scanned_count} account(s).")
+                output_results(last_accounts, partial=True)
+                return
+            if args.max_accounts and scanned_count >= args.max_accounts:
+                status_print(f"[STOP] Reached --max-accounts {args.max_accounts}.")
+                output_results(last_accounts, partial=True)
+                return
+            status_print(f"[SCAN] Account {index}/{len(accounts)}: {account_id}")
+            get_ali_resources(account=account, assumed_role_client=org_assumed_role_client, role_arn=org_role_arn)
+            last_accounts.append(account)
+            scanned_count += 1
+            if args.checkpoint_interval and scanned_count % args.checkpoint_interval == 0:
+                status_print(f"[CHECKPOINT] {scanned_count} account(s) complete.")
+                output_results(last_accounts, partial=True)
+    except Exception:
+        output_results(last_accounts, partial=True)
+        raise
+
+    output_results(last_accounts)
 
 
 if __name__ == '__main__':
+    last_accounts = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

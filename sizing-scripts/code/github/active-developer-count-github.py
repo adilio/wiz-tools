@@ -85,6 +85,19 @@ parser.add_argument(
     help = 'Output verbose information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--progress-interval',
+    dest = 'progress_interval',
+    help = 'Print a progress line every N repositories (default: 25)',
+    type = int,
+    default = 25
+)
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output files (default: current directory)',
+    default = '.'
+)
 args = parser.parse_args()
 
 
@@ -101,6 +114,7 @@ developers_per_repo     = []
 developers_across_repos = []
 
 errors_log = []
+run_started_at = time.monotonic()
 
 
 ####
@@ -108,9 +122,27 @@ errors_log = []
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_repositories, partial=True)
     sys.exit(0)
 
 
@@ -157,13 +189,14 @@ def slugify(strings):
 def output_results_across_version_control_systems():
     """  Output results across all scanned version control systems """
     developers = []
-    for file in os.listdir():
+    scan_dir = args.output_dir
+    for file in os.listdir(scan_dir):
         if file.endswith('-developers.txt') and file != output_file:
-            with open(file, 'r', encoding='utf-8') as developers_file:
+            with open(os.path.join(scan_dir, file), 'r', encoding='utf-8') as developers_file:
                 developers.extend(developers_file.read().split())
     # Deduplicate developers.
     developers = sorted(set(developers))
-    with open(output_file, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -416,12 +449,13 @@ def get_active_developers(repository):
     developers_per_repo.append([args.org, repository.full_name, len(repository_active_developers)])
 
 
-def output_results(repositories):
+def output_results(repositories, partial=False):
     """ Output Results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Developer File
     developers_across_repos_set = sorted(set(developers_across_repos)) # Deduplicate
     developer_file_name = f"github{slugify([args.org, args.repo])}-developers.txt"
-    with open(developer_file_name, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(developer_file_name), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers_across_repos_set:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -429,7 +463,7 @@ def output_results(repositories):
             developer_file.write(f"{developer_email}\n")
     # Log File
     developer_log_file_name = f"github{slugify([args.org, args.repo])}-developers-log.txt"
-    with open(developer_log_file_name, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(developer_log_file_name), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Organization', 'Repository', f"Developers (Last {number_of_days} Days)"])
         for item in developers_per_repo:
@@ -437,14 +471,18 @@ def output_results(repositories):
 
     # Error File
     if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
             for error in errors_log:
                 err_file.write(error + "\n")
 
     # Summary
-    repository_details = f" in Repository: {args.repo}" if args.repo else f" across {repositories.totalCount} Repositories"
+    total_repos = repositories.totalCount if hasattr(repositories, 'totalCount') else len(repositories)
+    repository_details = f" in Repository: {args.repo}" if args.repo else f" across {total_repos} Repositories"
     organization_details = f" in Organization: {args.org}" if args.org else ""
-    print(f"\nResults (Active Developers in the last {number_of_days} days)\n")
+    label = "Partial Results" if partial else "Results"
+    print(f"\n{label} (Active Developers in the last {number_of_days} days)\n")
+    if partial:
+        print("Scan interrupted; counts above reflect developers found so far.\n")
     print(f"- {len(developers_across_repos_set)} Developers{repository_details}{organization_details}")
     output_results_across_version_control_systems()
     # Sanity check for only public repositories, or no repositories.
@@ -473,6 +511,7 @@ def output_results(repositories):
 
 def main():
     """ Calculon Compute! """
+    global last_repositories  # pylint: disable=global-statement
     client = get_client()
     repository_details = f" Repository: {args.repo}" if args.repo else ""
     organization_details = f" in Organization: {args.org}" if args.org else ""
@@ -501,27 +540,38 @@ def main():
             repositories = [repository]
         else:
             repositories = get_repositories(user)
+    last_repositories = list(repositories)
+    total_repos = len(last_repositories)
+    status_print(f"[SCAN] Scanning {total_repos} repositor{'y' if total_repos == 1 else 'ies'} ...")
     if args.debug_mode:
-        for repository in repositories:
+        for i, repository in enumerate(last_repositories, start=1):
             get_active_developers(repository)
+            if i == 1 or i % args.progress_interval == 0 or i == total_repos:
+                status_print(f"Progress: {i}/{total_repos} repositories processed")
     else:
         futures = {}
         failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-            for repository in repositories:
+            for repository in last_repositories:
                 futures[executor.submit(get_active_developers, repository)] = repository.full_name
+        repos_done = 0
         for future in concurrent.futures.as_completed(futures):
+            repos_done += 1
             if future.exception():
                 failed_tasks += 1
                 error_print(future.exception(), f"repo={futures[future]}")
+            if repos_done == 1 or repos_done % args.progress_interval == 0 or repos_done == total_repos:
+                status_print(f"Progress: {repos_done}/{total_repos} repositories processed")
         if failed_tasks:
             error_print(f"{failed_tasks} repository task(s) failed")
-    output_results(repositories)
+    status_print(f"[DONE] Scan complete: {total_repos} repositor{'y' if total_repos == 1 else 'ies'} scanned")
+    output_results(last_repositories)
 
 
 ####
 
 
 if __name__ == "__main__":
+    last_repositories = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

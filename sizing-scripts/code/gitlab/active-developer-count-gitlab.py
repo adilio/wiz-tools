@@ -13,6 +13,7 @@ import inspect
 import os
 import signal
 import sys
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -83,6 +84,19 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--progress-interval',
+    dest = 'progress_interval',
+    help = 'Print a progress line every N projects (default: 25)',
+    type = int,
+    default = 25
+)
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output files (default: current directory)',
+    default = '.'
+)
 args = parser.parse_args()
 
 
@@ -99,6 +113,7 @@ developers_per_repo     = []
 developers_across_repos = []
 
 errors_log = []
+run_started_at = time.monotonic()
 
 
 ####
@@ -106,9 +121,27 @@ errors_log = []
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_gitlab_projects, partial=True)
     sys.exit(0)
 
 
@@ -155,13 +188,14 @@ def slugify(strings):
 def output_results_across_version_control_systems():
     """  Output results across all scanned version control systems """
     developers = []
-    for file in os.listdir():
+    scan_dir = args.output_dir
+    for file in os.listdir(scan_dir):
         if file.endswith('-developers.txt') and file != output_file:
-            with open(file, 'r', encoding='utf-8') as developers_file:
+            with open(os.path.join(scan_dir, file), 'r', encoding='utf-8') as developers_file:
                 developers.extend(developers_file.read().split())
     # Deduplicate developers.
     developers = sorted(set(developers))
-    with open(output_file, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -444,12 +478,13 @@ def get_active_developers(project):
     return repository_active_developers
 
 
-def output_results(gitlab_projects):
+def output_results(gitlab_projects, partial=False):
     """ Output Results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Developer File
     developers_across_repos_set = sorted(set(developers_across_repos)) # Deduplicate
     developer_file_name = f"gitlab{slugify([args.group, args.proj])}-developers.txt"
-    with open(developer_file_name, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(developer_file_name), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers_across_repos_set:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -457,7 +492,7 @@ def output_results(gitlab_projects):
             developer_file.write(f"{developer_email}\n")
     # Log File
     developer_log_file_name = f"gitlab{slugify([args.group, args.proj])}-developers-log.txt"
-    with open(developer_log_file_name, 'w', encoding='utf-8') as csv_file:
+    with open(output_path(developer_log_file_name), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(['Group', 'Project', f"Developers (Last {number_of_days} Days)"])
         for item in developers_per_repo:
@@ -465,14 +500,17 @@ def output_results(gitlab_projects):
 
     # Error File
     if errors_log:
-        with open(error_log_file, 'w', encoding='utf-8') as err_file:
+        with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
             for error in errors_log:
                 err_file.write(error + "\n")
 
     # Summary
     project_details = f" in Project: {args.proj}" if args.proj else f" across {len(gitlab_projects)} Projects"
     group_details   = f" in Group: {args.group}" if args.group else ""
-    print(f"\nResults (Active Developers in the last {number_of_days} days)\n")
+    label = "Partial Results" if partial else "Results"
+    print(f"\n{label} (Active Developers in the last {number_of_days} days)\n")
+    if partial:
+        print("Scan interrupted; counts above reflect developers found so far.\n")
     print(f"- {len(developers_across_repos_set)} Developers{project_details}{group_details}")
     output_results_across_version_control_systems()
     # Sanity check for only public repositories, or no repositories.
@@ -500,6 +538,7 @@ def output_results(gitlab_projects):
 
 def main():
     """ Calculon Compute! """
+    global last_gitlab_projects  # pylint: disable=global-statement
     client = get_client()
     project_details = f" Project: {args.proj}" if args.proj else ""
     group_details = f" in Group: {args.group}" if args.group else ""
@@ -523,37 +562,47 @@ def main():
     # The python-gitlab list() methods return a generator object when passing the argument iterator=True
     # But you cannot iterate over the generator object more than once, which this script does with projects in output_results().
     # Copy projects to gitlab_projects to allow for iteration more than once.
-    gitlab_projects = []
+    last_gitlab_projects = []
+    status_print("[SCAN] Starting project scan ...")
     if args.debug_mode:
-        for project in projects:
-            gitlab_projects.append(GitLabProject(name_with_namespace=project.name_with_namespace, visibility=project.visibility))
+        for i, project in enumerate(projects, start=1):
+            last_gitlab_projects.append(GitLabProject(name_with_namespace=project.name_with_namespace, visibility=project.visibility))
             if args.group:
                 get_active_developers(client.projects.get(project.id))
             else:
                 get_active_developers(project)
+            if i == 1 or i % args.progress_interval == 0:
+                status_print(f"Progress: {i} project(s) processed")
     else:
         futures = {}
         failed_tasks = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
             for project in projects:
-                gitlab_projects.append(GitLabProject(name_with_namespace=project.name_with_namespace, visibility=project.visibility))
+                last_gitlab_projects.append(GitLabProject(name_with_namespace=project.name_with_namespace, visibility=project.visibility))
                 if args.group:
                     p = client.projects.get(project.id)
                     futures[executor.submit(get_active_developers, p)] = project.name_with_namespace
                 else:
                     futures[executor.submit(get_active_developers, project)] = project.name_with_namespace
+        total_projects = len(last_gitlab_projects)
+        projects_done = 0
         for future in concurrent.futures.as_completed(futures):
+            projects_done += 1
             if future.exception():
                 failed_tasks += 1
                 error_print(future.exception(), f"project={futures[future]}")
+            if projects_done == 1 or projects_done % args.progress_interval == 0 or projects_done == total_projects:
+                status_print(f"Progress: {projects_done}/{total_projects} projects processed")
         if failed_tasks:
             error_print(f"{failed_tasks} project task(s) failed")
-    output_results(gitlab_projects)
+    status_print(f"[DONE] Scan complete: {len(last_gitlab_projects)} project(s) scanned")
+    output_results(last_gitlab_projects)
 
 
 ####
 
 
 if __name__ == "__main__":
+    last_gitlab_projects = []
     signal.signal(signal.SIGINT,signal_handler)
     main()

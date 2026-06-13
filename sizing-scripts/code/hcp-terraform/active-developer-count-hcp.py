@@ -49,6 +49,12 @@ parser.add_argument(
     help = 'Output verbose debugging information (default: disabled)',
     default = False
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output files (default: current directory)',
+    default = '.'
+)
 args = parser.parse_args()
 
 
@@ -64,15 +70,34 @@ headers = {
 
 output_file    = 'active-developers.txt'
 number_of_days = 90
+run_started_at = time.monotonic()
 
 ####
 # Common Library Code
 ####
 
 
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_developers, partial=True)
     sys.exit(0)
 
 
@@ -99,13 +124,14 @@ def days_ago_iso():
 def output_results_across_version_control_systems():
     """  Output results across all scanned version control systems """
     developers = []
-    for file in os.listdir():
+    scan_dir = args.output_dir
+    for file in os.listdir(scan_dir):
         if file.endswith('-developers.txt') and file != output_file:
-            with open(file, 'r', encoding='utf-8') as developers_file:
+            with open(os.path.join(scan_dir, file), 'r', encoding='utf-8') as developers_file:
                 developers.extend(developers_file.read().split())
     # Deduplicate developers.
     developers = sorted(set(developers))
-    with open(output_file, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(output_file), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -295,11 +321,57 @@ def get_configuration_version_commit(configuration_version_id: str):
 # Cannot output results across version control systems, as HCPT does not return email addresses.
 
 
-def output_results(developers):
+def process_run(run, run_id, context_label, days_ago, run_cache, service_account_cache, user_cache, member_cache, developers):
+    """ Process a single HCP Terraform run and add the developer to the developers dict if applicable. """
+    if run_id in run_cache:
+        return
+    run_cache[run_id] = run_id
+    created_at = run['attributes']['created-at']
+    if created_at < days_ago:
+        return
+    if run['attributes']['source'] in ['tfe-ui', 'tfe-ui,tfe-api']:
+        if 'created-by' not in run['relationships']:
+            return
+        created_by = run['relationships']['created-by']['data']
+        if created_by['type'] != 'users':
+            return
+        if created_by['id'] in service_account_cache:
+            user = service_account_cache[created_by['id']]
+        elif created_by['id'] in user_cache:
+            user = user_cache[created_by['id']]
+        else:
+            user = get_user(created_by['id'])
+            if not user:
+                return
+        if user['attributes']['is-service-account']:
+            service_account_cache[user['id']] = user
+            return
+        user_cache[user['id']] = user
+        if user['id'] in member_cache:
+            developers[member_cache[user['id']]['attributes']['email']] = user
+            print(f"        {context_label} Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}/{member_cache[user['id']]['attributes']['email']})")
+        else:
+            developers[user['id']] = user
+            print(f"        {context_label} Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']})")
+    elif run['attributes']['source'] == 'tfe-configuration-version':
+        if 'configuration-version' not in run['relationships']:
+            return
+        cv_ref = run['relationships']['configuration-version']['data']
+        configuration_version = get_configuration_version(cv_ref['id'])
+        if not configuration_version or 'id' not in configuration_version:
+            return
+        configuration_version_commit = get_configuration_version_commit(configuration_version['id'])
+        if configuration_version_commit and 'sender-username' in configuration_version_commit.get('attributes', {}):
+            developers[configuration_version_commit['attributes']['sender-username']] = configuration_version_commit
+            print(f"        {context_label} Run: {run_id} Created by Committer: {configuration_version_commit['attributes']['sender-username']} in {configuration_version['attributes']['source']}")
+
+
+def output_results(developers, partial=False):
     """ Output Results """
+    os.makedirs(args.output_dir, exist_ok=True)
     # Developer File
     developer_file_name = 'hcpt-developers.txt'
-    with open(developer_file_name, 'w', encoding='utf-8') as developer_file:
+    with open(output_path(developer_file_name), 'w', encoding='utf-8') as developer_file:
         for developer in developers:
             # Encrypt sensitive data before writing to disk.
             if not args.decrypt:
@@ -308,8 +380,11 @@ def output_results(developers):
             developer_file.write(f"{developer}\n")
 
     # Summary
+    label = "Partial Results" if partial else "Results"
     print()
-    print(f"\nResults (Active Developers in the last {number_of_days} days)\n")
+    print(f"\n{label} (Active Developers in the last {number_of_days} days)\n")
+    if partial:
+        print("Scan interrupted; counts above reflect developers found so far.\n")
     print(f"- {len(developers)} Developers")
     output_results_across_version_control_systems()
 
@@ -322,6 +397,7 @@ def output_results(developers):
 # pylint: disable=consider-using-dict-items,too-many-branches,too-many-locals,too-many-statements
 def main():
     """ Calculon Compute! """
+    global last_developers  # pylint: disable=global-statement
 
     days_ago = days_ago_iso()
 
@@ -330,6 +406,7 @@ def main():
     service_account_cache = {}
     user_cache            = {}
     developers            = {}
+    last_developers       = developers
 
     # filter[source]
     # Optionally exclude counting users in sources already counted by our other active developer scripts.
@@ -343,14 +420,15 @@ def main():
     # If omitted, the endpoint returns all runs since the creation of the workspace.
     run_filter['filter[timeframe]'] = 'year'
 
-    print("Scanning HCP Terraform")
+    status_print("[SCAN] Scanning HCP Terraform")
 
     print()
     print('Collecting Organizations, please wait ...')
     organizations = get_organizations()
-    for organization_id in organizations:
+    for org_index, organization_id in enumerate(organizations, start=1):
         print()
-        print(f"Organization: {organizations[organization_id]['attributes']['name']} ({organization_id})")
+        org_name = organizations[organization_id]['attributes']['name']
+        status_print(f"Organization {org_index}/{len(organizations)}: {org_name} ({organization_id})")
         print('    Collecting Organization Memberships, please wait ...')
         memberships = get_organization_memberships(organization_id)
         for membership_id in memberships:
@@ -362,119 +440,31 @@ def main():
 
         print('    Collecting Workspaces, please wait ...')
         workspaces = get_organization_workspaces(organization_id)
-        for workspace_id in workspaces:
-            print(f"        Workspace: {workspaces[workspace_id]['attributes']['name']} ({workspace_id})")
+        for ws_index, workspace_id in enumerate(workspaces, start=1):
+            ws_name = workspaces[workspace_id]['attributes']['name']
+            status_print(f"    Workspace {ws_index}/{len(workspaces)}: {ws_name} ({workspace_id})")
             print( '            Collecting Workspace-Level Runs, please wait ...')
             runs = get_workspace_runs(workspace_id, run_filter)
             for run_id in runs:
-                run = runs[run_id]
-                # Do not recount runs returned by previous Organization or Workspace Run API calls.
-                if run_id in run_cache:
-                    continue
-                run_cache[run_id] = run_id
-                created_at = run['attributes']['created-at']
-                if created_at < days_ago:
-                    # Do not count runs older than the last number of days.
-                    continue
-                if run['attributes']['source'] in ['tfe-ui', 'tfe-ui,tfe-api']:
-                    if 'created-by' not in run['relationships']:
-                        continue
-                    created_by = run['relationships']['created-by']['data']
-                    # Validate if this check is necessary.
-                    if created_by['type'] != 'users':
-                        continue
-                    if created_by['id'] in service_account_cache:
-                        user = service_account_cache[created_by['id']]
-                    elif created_by['id'] in user_cache:
-                        user = user_cache[created_by['id']]
-                    else:
-                        user = get_user(created_by['id'])
-                        if not user:
-                            continue
-                    if user['attributes']['is-service-account']:
-                        service_account_cache[user['id']] = user
-                        continue
-                    user_cache[user['id']] = user
-                    if user['id'] in member_cache:
-                        # Use email from Organization Memberships, when available, to deduplicate across our other active developer scripts.
-                        developers[member_cache[user['id']]['attributes']['email']] = user
-                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']}/{member_cache[user['id']]['attributes']['email']})")
-                    else:
-                        developers[user['id']] = user
-                        print(f"                Workspace Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']})")
-                elif run['attributes']['source'] == 'tfe-configuration-version':
-                    if 'configuration-version' not in run['relationships']:
-                        continue
-                    cv_ref = run['relationships']['configuration-version']['data']
-                    configuration_version = get_configuration_version(cv_ref['id'])
-                    if not configuration_version or 'id' not in configuration_version:
-                        continue
-                    configuration_version_commit = get_configuration_version_commit(configuration_version['id'])
-                    if configuration_version_commit and 'sender-username' in configuration_version_commit.get('attributes', {}):
-                        developers[configuration_version_commit['attributes']['sender-username']] = configuration_version_commit
-                        print(f"                Workspace Run: {run_id} Created by Commiter: {configuration_version_commit['attributes']['sender-username']} in {configuration_version['attributes']['source']} ")
+                process_run(runs[run_id], run_id, f"Workspace {ws_name}", days_ago, run_cache, service_account_cache, user_cache, member_cache, developers)
             print('        Done (Workspace-Level Runs)')
         print('    Done (Workspaces)')
 
         print('    Collecting Organization-Level Runs, please wait ...')
         runs = get_organization_runs(organization_id, run_filter)
         for run_id in runs:
-            run = runs[run_id]
-            if run_id in run_cache:
-                # Do not recount runs returned by previous Organization Run API calls.
-                continue
-            run_cache[run_id] = run_id
-            created_at = run['attributes']['created-at']
-            if created_at < days_ago:
-                # Do not count runs older than the last number of days.
-                continue
-            if run['attributes']['source'] in ['tfe-ui', 'tfe-ui,tfe-api']:
-                if 'created-by' not in run['relationships']:
-                    continue
-                created_by = run['relationships']['created-by']['data']
-                # Validate if this check is necessary.
-                if created_by['type'] != 'users':
-                    continue
-                if created_by['id'] in service_account_cache:
-                    user = service_account_cache[created_by['id']]
-                elif created_by['id'] in user_cache:
-                    user = user_cache[created_by['id']]
-                else:
-                    user = get_user(created_by['id'])
-                    if not user:
-                        continue
-                if user['attributes']['is-service-account']:
-                    service_account_cache[user['id']] = user
-                    continue
-                user_cache[user['id']] = user
-                if user['id'] in member_cache:
-                    # Use email from Organization Memberships, when available, to deduplicate across our other active developer scripts.
-                    developers[member_cache[user['id']]['attributes']['email']] = user
-                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']} / {member_cache[user['id']]['attributes']['email']})")
-                else:
-                    developers[user['id']] = user
-                    print(f"        Organization Run: {run_id} Created by User: {user['attributes']['username']} ({user['id']})")
-            elif run['attributes']['source'] == 'tfe-configuration-version':
-                if 'configuration-version' not in run['relationships']:
-                    continue
-                cv_ref = run['relationships']['configuration-version']['data']
-                configuration_version = get_configuration_version(cv_ref['id'])
-                if not configuration_version or 'id' not in configuration_version:
-                    continue
-                configuration_version_commit = get_configuration_version_commit(configuration_version['id'])
-                if configuration_version_commit and 'sender-username' in configuration_version_commit.get('attributes', {}):
-                    developers[configuration_version_commit['attributes']['sender-username']] = configuration_version_commit
-                    print(f"        Organization Run: {run_id} Created by Commiter: {configuration_version_commit['attributes']['sender-username']} in {configuration_version['attributes']['source']} ")
+            process_run(runs[run_id], run_id, "Organization", days_ago, run_cache, service_account_cache, user_cache, member_cache, developers)
         print('    Done (Organization-Level Runs)')
     print()
-    print('Done (Organizations)')
+    status_print(f"[DONE] Scan complete: {len(organizations)} organization(s), {len(last_developers)} developer(s) found")
 
-    output_results(developers)
+    output_results(last_developers)
 
 
 ####
 
 
 if __name__ == "__main__":
+    last_developers = {}
     signal.signal(signal.SIGINT,signal_handler)
     main()

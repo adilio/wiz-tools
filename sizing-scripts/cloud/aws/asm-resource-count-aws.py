@@ -11,11 +11,13 @@ import inspect
 import json
 import os
 import shutil
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 # As a single script download, we do not publish a requirements.txt. Autodocument.
 
@@ -144,6 +146,51 @@ parser.add_argument(
     help = 'AWS CLI profile name to use for authentication (default: the default profile)',
     default = None
 )
+parser.add_argument(
+    '--output-dir',
+    dest = 'output_dir',
+    help = 'Directory for output CSV and error log files (default: current directory)',
+    default = '.'
+)
+parser.add_argument(
+    '--max-run-minutes',
+    dest = 'max_run_minutes',
+    help = 'Stop scanning after N minutes and write partial results (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--max-accounts',
+    dest = 'max_accounts',
+    help = 'Stop after scanning N accounts (default: unlimited)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--checkpoint-interval',
+    dest = 'checkpoint_interval',
+    help = 'Write partial output every N completed accounts (default: 0, disabled)',
+    type = int,
+    default = 0
+)
+parser.add_argument(
+    '--start-after-account',
+    dest = 'start_after_account',
+    help = 'Skip accounts until after this account ID, useful for resuming sorted --all scans',
+    default = None
+)
+parser.add_argument(
+    '--include-account-regex',
+    dest = 'include_account_regex',
+    help = 'Only scan accounts whose ID or name matches this regular expression',
+    default = None
+)
+parser.add_argument(
+    '--exclude-account-regex',
+    dest = 'exclude_account_regex',
+    help = 'Skip accounts whose ID or name matches this regular expression',
+    default = None
+)
 args = parser.parse_args()
 
 if args.max_lambda_versions < 0 or args.max_lambda_versions > 10:
@@ -156,6 +203,8 @@ if args.max_workers < 1 or args.max_workers > 255:
 if args.profile:
     boto3.setup_default_session(profile_name=args.profile)
 
+include_account_pattern = re.compile(args.include_account_regex) if args.include_account_regex else None
+exclude_account_pattern = re.compile(args.exclude_account_regex) if args.exclude_account_regex else None
 
 ####
 # Configuration and Globals
@@ -214,6 +263,7 @@ public_domains_lock = threading.Lock()
 totals_lock = threading.Lock()
 totals_log_lock = threading.Lock()
 errors_log_lock = threading.Lock()
+run_started_at = time.monotonic()
 
 
 try:
@@ -233,9 +283,43 @@ except Exception as ex0:  # pylint: disable=broad-exception-caught
 ####
 # Common Library Code
 ####
+
+def elapsed_time():
+    elapsed = int(time.monotonic() - run_started_at)
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def status_print(message):
+    print(f"+{elapsed_time()} {message}")
+
+
+def output_path(filename):
+    return os.path.join(args.output_dir, filename)
+
+
+def max_runtime_reached():
+    if not args.max_run_minutes:
+        return False
+    return (time.monotonic() - run_started_at) >= args.max_run_minutes * 60
+
+
+def account_matches_filters(account_id, account_name):
+    haystack = f"{account_id} {account_name}"
+    if include_account_pattern and not include_account_pattern.search(haystack):
+        return False
+    if exclude_account_pattern and exclude_account_pattern.search(haystack):
+        return False
+    return True
+
+
 def signal_handler(_signal_received, _frame):
     """ Control-C """
-    print("\nExiting")
+    status_print("[INTERRUPTED] Writing partial results before exiting.")
+    output_results(last_accounts, partial=True)
     sys.exit(0)
 
 
@@ -1681,6 +1765,7 @@ def get_aws_sagemaker_endpoints(region, credentials, account):
 def get_aws_resources(account, current_account_id, root_account_id):
     """ Get billable resources """
     exceptions = 0
+    status_print(f"[SCAN] Account start: {account['Id']} ({account['Name']})")
     credentials = aws_get_credentials(account['Id'], current_account_id, root_account_id)
     verbose_print(f"credentials: obtained for account {account['Id']}")
     if not credentials:
@@ -1764,16 +1849,18 @@ def get_aws_resources(account, current_account_id, root_account_id):
                 error_print(future.exception(), f"{account['Id']} task={futures[future]}")
         if failed_tasks:
             error_print(f"{failed_tasks} task(s) failed for account {account['Id']} {account['Name']}")
+    status_print(f"[DONE] Account complete: {account['Id']} ({len(futures) if not args.debug_mode else 'sequential'} task(s), {failed_tasks} exception(s))")
 
 
-def output_results(accounts, scan_results=None):
+def output_results(accounts, scan_results=None, partial=False):
     """ Output results """
     # Write CSV output files — wrapped in try/except so a filesystem error
     # (read-only directory, full disk, etc.) doesn't lose the console summary.
+    os.makedirs(args.output_dir, exist_ok=True)
     csv_write_errors = []
     try:
         # Summary File
-        with open(output_file, 'w', encoding='utf-8', newline='') as csv_file:
+        with open(output_path(output_file), 'w', encoding='utf-8', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(['Resource Type', 'Resource Count'])
             for resource_type, resource_count in totals.items():
@@ -1783,7 +1870,7 @@ def output_results(accounts, scan_results=None):
 
     try:
         # Log File
-        with open(output_file_log, 'w', encoding='utf-8') as csv_file:
+        with open(output_path(output_file_log), 'w', encoding='utf-8') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(['Resource Type', 'Resource Count', 'Account', 'Region'])
             for item in totals_log:
@@ -1794,7 +1881,7 @@ def output_results(accounts, scan_results=None):
     # Error File
     if errors_log:
         try:
-            with open(error_log_file, 'w', encoding='utf-8') as err_file:
+            with open(output_path(error_log_file), 'w', encoding='utf-8') as err_file:
                 for error in errors_log:
                     err_file.write(error + "\n")
         except OSError as e:
@@ -1802,7 +1889,7 @@ def output_results(accounts, scan_results=None):
 
     try:
         # VM Public IPs File
-        with open(output_file_ips, 'w', encoding='utf-8', newline='') as csv_file:
+        with open(output_path(output_file_ips), 'w', encoding='utf-8', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(['Instance ID', 'Public IP', 'Type', 'Region', 'Account'])
             for ip_info in vm_public_ips:
@@ -1813,7 +1900,7 @@ def output_results(accounts, scan_results=None):
 
     try:
         # Public Domains File
-        with open(output_file_domains, 'w', encoding='utf-8', newline='') as csv_file:
+        with open(output_path(output_file_domains), 'w', encoding='utf-8', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(['Resource ID', 'Domain', 'Type', 'Region', 'Account'])
             for domain_info in public_domains:
@@ -1823,7 +1910,10 @@ def output_results(accounts, scan_results=None):
         csv_write_errors.append(f"Failed to write {output_file_domains}: {e}")
 
     # Summary
-    print(f"\nResults across {len(accounts)} AWS Accounts (script version: {version})\n")
+    label = "Partial results" if partial else "Results"
+    print(f"\n{label} across {len(accounts)} AWS Accounts (script version: {version})\n")
+    if partial:
+        print("Scan interrupted; results above cover completed accounts only.\n")
 
     if enabled['Virtual Machines']:
         print(f"{str(totals['Virtual Machines']).rjust(padding)} Virtual Machines [EC2]")
@@ -2029,6 +2119,7 @@ def output_results(accounts, scan_results=None):
 
 def main():
     """ Calculon Compute! """
+    global last_accounts  # pylint: disable=global-statement
     root_account_id = None
 
     print("Getting the current AWS Account")
@@ -2060,6 +2151,9 @@ def main():
             print("="*70)
         else:
             print("All permissions validated successfully.")
+        if args.all:
+            print("NOTE: Permission validation ran against the management account only.")
+            print("      Member accounts with different IAM policies may produce additional errors during scanning.")
     else:
         print("WARNING: Unable to obtain credentials for permission validation. Proceeding with best effort.")
 
@@ -2105,10 +2199,37 @@ def main():
         else:
             accounts = [{'Id': current_account_id, 'Name': current_account_id}]
 
+    if args.start_after_account:
+        original_count = len(accounts)
+        accounts = [a for a in accounts if a['Id'] > args.start_after_account]
+        print(f"\n- Resuming after Account ID {args.start_after_account}; skipped {original_count - len(accounts)} accounts")
+
+    if include_account_pattern or exclude_account_pattern:
+        accounts = [a for a in accounts if account_matches_filters(a['Id'], a['Name'])]
+        print(f"\n- After regex filters: {len(accounts)} accounts to scan")
+
+    if args.max_accounts:
+        print(f"\n- Limiting scan to {args.max_accounts} accounts")
+        accounts = accounts[:args.max_accounts]
+
+    accounts_completed = 0
+    last_accounts = []
     print("\nGetting Billable Resources for each AWS Account ...")
-    for account in accounts:
-        print(f"\nScanning {account['Id']} - {account['Name']}")
-        get_aws_resources(account, current_account_id, root_account_id)
+    try:
+        for index, account in enumerate(accounts, start=1):
+            if max_runtime_reached():
+                print(f"\nReached --max-run-minutes={args.max_run_minutes}. Writing partial results before exiting.")
+                output_results(last_accounts, partial=True)
+                return
+            status_print(f"Scanning account {index}/{len(accounts)}: {account['Id']} - {account['Name']}")
+            get_aws_resources(account, current_account_id, root_account_id)
+            last_accounts.append(account)
+            accounts_completed += 1
+            if args.checkpoint_interval and accounts_completed % args.checkpoint_interval == 0:
+                output_results(last_accounts, partial=True)
+    except Exception:
+        output_results(last_accounts, partial=True)
+        raise
 
     scan_results = {}
     if args.port_scan:
@@ -2138,11 +2259,12 @@ def main():
         else:
             print("\nNo public IPs eligible for port scanning.")
 
-    output_results(accounts, scan_results)
+    output_results(last_accounts, scan_results)
 
 
 ####
 
 if __name__ == "__main__":
+    last_accounts = []
     signal.signal(signal.SIGINT,signal_handler)
     main()
