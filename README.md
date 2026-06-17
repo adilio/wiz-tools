@@ -10,7 +10,7 @@ A static catalog is published from the [`docs/`](docs/) directory:
 
 - [wiz-tools landing page](https://adilio.github.io/wiz-tools/)
 - [Wiz SHI Report Viewer](https://adilio.github.io/wiz-tools/wiz-shi-report-viewer/)
-- [Wiz Sizing Scripts](https://adilio.github.io/wiz-tools/sizing-scripts/) including Microsoft 365, Azure DevOps, GCP, and other sizing scripts
+- [Wiz Sizing Scripts](https://adilio.github.io/wiz-tools/sizing-scripts/) including Microsoft 365, Azure DevOps, GCP, Defend ingestion, and other sizing scripts
 - [Legacy Microsoft 365 Sizing Script page](https://adilio.github.io/wiz-tools/m365-sizing-xl/) kept for older shared links
 
 ## Tools
@@ -19,14 +19,14 @@ A static catalog is published from the [`docs/`](docs/) directory:
 |---|---|---|
 | [Wiz SHI Report Viewer](wiz-shi-report-viewer/) | Turn Wiz security issue CSV exports into an interactive report viewer. | Open `wiz-shi-report-viewer/wiz-shi-report-viewer.html` in a browser. |
 | [Microsoft 365 Sizing Script](sizing-scripts/saas/microsoft-365/) | Estimate Wiz billable units for Microsoft 365 SaaS users and virtual drives. | Run `sizing-scripts/saas/microsoft-365/365_Sizing_Script.ps1` from Azure Cloud Shell. |
-| [Wiz Sizing Scripts](sizing-scripts/) | Organized copies of Wiz Code, Cloud, SaaS, and infrastructure resource-discovery scripts. | Browse the relevant provider folder and run that script's documented command. |
+| [Wiz Sizing Scripts](sizing-scripts/) | Organized copies of Wiz Code, Cloud, SaaS, Defend ingestion, and infrastructure resource-discovery scripts. | Browse the relevant provider folder and run that script's documented command. |
 
 ## Repository Layout
 
 ```text
 .
 ├── docs/                    # GitHub Pages/static published versions
-├── sizing-scripts/           # Organized Code, Cloud, and SaaS sizing scripts
+├── sizing-scripts/           # Organized Code, Cloud, Defend, and SaaS sizing scripts
 ├── wiz-shi-report-viewer/    # Single-file Wiz security issue report viewer
 ├── LICENSE
 └── README.md

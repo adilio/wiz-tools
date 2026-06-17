@@ -134,6 +134,11 @@ footer a:hover{color:var(--accent);}
             <p>Holds SaaS-specific sizing scripts, including the hardened Microsoft 365 sizing script.</p>
             <a href="#saas">View SaaS scripts</a>
           </div>
+          <div class="area">
+            <div class="area-title">Defend</div>
+            <p>Estimates Defend log ingestion volume for AWS, Azure, and GCP before Wiz Defend is connected.</p>
+            <a href="#defend">View Defend scripts</a>
+          </div>
         </div>
         <div class="callout"><strong>Privacy note:</strong> Some scripts create local output files with contributor or resource details. Review those files before sharing them.</div>
       </section>
@@ -334,11 +339,25 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
         </table>
       </section>
 
+      <section id="defend">
+        <h2>Defend Scripts</h2>
+        <p>These scripts estimate Wiz Defend ingestion billable units from supported cloud log sources. They are organized separately from cloud resource-count scripts because they measure log volume, not resource inventory.</p>
+        <table>
+          <thead><tr><th>Platform</th><th>Status</th><th>Repo path</th><th>Instruction gist</th></tr></thead>
+          <tbody>
+            <tr><td>AWS Defend</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/defend/aws/log-volume-estimation-aws.py</code></td><td><a href="https://gist.github.com/adilio/af9f797cf220586bb7d6ae204b7a64b4" target="_blank">Instructions</a></td></tr>
+            <tr><td>Azure Defend</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/defend/azure/log-volume-estimation-azure.py</code></td><td><a href="https://gist.github.com/adilio/5fbc7ae00184bd0c44b04888af76cea3" target="_blank">Instructions</a></td></tr>
+            <tr><td>GCP Defend</td><td><code>wiz-copy</code></td><td><code>sizing-scripts/defend/gcp/log-volume-estimation-gcp.py</code></td><td><a href="https://gist.github.com/adilio/1cd3922c546c601a0614d7ef62e0dc7f" target="_blank">Instructions</a></td></tr>
+          </tbody>
+        </table>
+      </section>
+
       <section id="repo-layout">
         <h2>Repository Layout</h2>
         <pre><code>sizing-scripts/
 ├── cloud/
 ├── code/
+├── defend/
 └── saas/
     └── microsoft-365/
         └── 365_Sizing_Script.ps1</code></pre>
@@ -354,6 +373,7 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
       <a href="#cloud">Cloud scripts</a>
       <a href="#modified">What changed</a>
       <a href="#saas">SaaS scripts</a>
+      <a href="#defend">Defend scripts</a>
       <a href="#repo-layout">Repo layout</a>
     </aside>
   </main>

@@ -12,6 +12,7 @@ Use [SCRIPT_STATUS.md](SCRIPT_STATUS.md) to see which scripts are straight Wiz-h
 |---|---|---|
 | Code | [code/](code/) | Count active developers across version control systems and HCP Terraform. |
 | Cloud | [cloud/](cloud/) | Count cloud, SaaS, data, registry, and infrastructure resources. |
+| Defend | [defend/](defend/) | Estimate Defend log ingestion volume for AWS, Azure, and GCP. |
 | SaaS | [saas/](saas/) | SaaS-specific sizing scripts, including Microsoft 365. |
 
 ## Canonical vs Compatibility Paths
@@ -31,6 +32,9 @@ Existing instruction gists were found for the cloud/provider scripts, HCP Terraf
 | Azure DevOps active developers | https://gist.github.com/adilio/34bee443582f724a88a953f2b65e1695 |
 | GitHub active developers | https://gist.github.com/adilio/dcf9c6d8158f4bda24a5496e026bfa4d |
 | GitLab active developers | https://gist.github.com/adilio/f2d0db7713f20fbec8e77b520d1ff0cf |
+| AWS Defend log volume | https://gist.github.com/adilio/af9f797cf220586bb7d6ae204b7a64b4 |
+| Azure Defend log volume | https://gist.github.com/adilio/5fbc7ae00184bd0c44b04888af76cea3 |
+| GCP Defend log volume | https://gist.github.com/adilio/1cd3922c546c601a0614d7ef62e0dc7f |
 
 Existing gists found in the account:
 
