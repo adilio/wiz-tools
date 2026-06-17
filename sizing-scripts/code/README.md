@@ -16,11 +16,15 @@ If you run more than one active-developer script in the same directory, the scri
 The Azure DevOps script in this repo includes operational hardening for large organizations:
 
 - Scans only the repositories in the current project instead of rescanning previously discovered repositories under later projects.
+- Prints a pre-scan summary before commit scanning so operators can see rough project/repository scope up front.
 - Paginates project and commit queries with `--project-page-size` and `--commit-page-size`.
+- Scans repositories concurrently with `--max-workers`.
 - Prints elapsed-time progress with `--progress-interval`.
+- Suppresses per-developer terminal output by default for faster Cloud Shell runs; use `--show-developers` when detailed terminal output is needed.
 - Writes checkpoint and partial output on interruption.
 - Supports guardrails such as `--max-repositories`, `--max-commits-per-repo`, and `--max-run-minutes`.
-- Retries Azure DevOps API calls with `--max-retries` and `--retry-delay`.
+- Retries Azure DevOps API calls with `--max-retries`, `--commit-max-retries`, `--retry-delay`, and `--max-retry-delay`.
+- Skips non-retryable commit API failures without waiting through the full backoff cycle.
 - Logs project/repository/API failures with context and continues scanning remaining repositories by default.
 
 Examples:
@@ -35,8 +39,14 @@ python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE
 # Bound a large org scan while validating behavior
 python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE --max-repositories 100 --progress-interval 10
 
+# Tune Cloud Shell parallelism if needed
+python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE --max-workers 4
+
 # Cap very large repositories during troubleshooting
 python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE --max-commits-per-repo 50000
+
+# Keep problematic commit API calls from slowing the whole scan
+python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE --commit-max-retries 1
 
 # Keep a customer run bounded by wall clock time
 python3 active-developer-count-ado.py --token ${ADO_TOKEN} --org EXAMPLE --max-run-minutes 240 --checkpoint-interval 10

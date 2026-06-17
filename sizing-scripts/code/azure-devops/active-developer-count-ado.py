@@ -7,9 +7,11 @@
 # Local status: modified from the Wiz-hosted script.
 # Origin: https://downloads.wiz.io/customer-files/scripts/ADO/active-developer-count-ado.py
 # Local changes: fixes repeated repository rescans across projects and adds
-# progress, pagination, partial output, and guardrails for large organizations.
+# progress, pagination, smarter retry handling, partial output, and guardrails
+# for large organizations.
 
 import argparse
+import concurrent.futures
 import csv
 import datetime
 import hashlib
@@ -17,6 +19,7 @@ import os
 import random
 import signal
 import sys
+import threading
 import time
 
 from importlib import import_module
@@ -41,6 +44,7 @@ GitQueryCommitsCriteria = import_module(import_version).GitQueryCommitsCriteria
 
 
 version='2.8.1'
+DEFAULT_MAX_WORKERS = min(8, (os.cpu_count() or 1) + 4)
 
 
 ####
@@ -87,6 +91,12 @@ parser.add_argument(
     default = False
 )
 parser.add_argument(
+    '--show-developers',
+    action = 'store_true',
+    help = 'Print each discovered developer to the terminal (default: disabled for faster Cloud Shell runs)',
+    default = False
+)
+parser.add_argument(
     '--days',
     help = 'Count active developers with commits in the last N days (default: 90)',
     type = int,
@@ -123,6 +133,12 @@ parser.add_argument(
     default = 0
 )
 parser.add_argument(
+    '--max-workers',
+    help = f'Maximum repositories to scan concurrently (default: {DEFAULT_MAX_WORKERS}, use 1 for sequential)',
+    type = int,
+    default = DEFAULT_MAX_WORKERS
+)
+parser.add_argument(
     '--include-disabled',
     action = 'store_true',
     help = 'Scan disabled repositories when Azure DevOps allows it (default: list and skip disabled repositories)',
@@ -153,10 +169,22 @@ parser.add_argument(
     default = 5
 )
 parser.add_argument(
+    '--commit-max-retries',
+    help = 'Retry attempts for commit page API calls (default: 2)',
+    type = int,
+    default = 2
+)
+parser.add_argument(
     '--retry-delay',
     help = 'Initial retry delay in seconds for Azure DevOps API calls (default: 5)',
     type = int,
     default = 5
+)
+parser.add_argument(
+    '--max-retry-delay',
+    help = 'Maximum retry delay in seconds between Azure DevOps API calls (default: 15)',
+    type = int,
+    default = 15
 )
 parser.add_argument(
     '--fail-fast',
@@ -194,6 +222,9 @@ if args.max_repositories < 0:
 if args.max_run_minutes < 0:
     print("ERROR: --max-run-minutes must be 0 or greater")
     sys.exit(1)
+if args.max_workers < 1 or args.max_workers > 64:
+    print("ERROR: --max-workers out of range: [1 .. 64]")
+    sys.exit(1)
 if args.progress_interval < 1:
     print("ERROR: --progress-interval must be at least 1")
     sys.exit(1)
@@ -203,8 +234,14 @@ if args.checkpoint_interval < 0:
 if args.max_retries < 1:
     print("ERROR: --max-retries must be at least 1")
     sys.exit(1)
+if args.commit_max_retries < 1:
+    print("ERROR: --commit-max-retries must be at least 1")
+    sys.exit(1)
 if args.retry_delay < 1:
     print("ERROR: --retry-delay must be at least 1")
+    sys.exit(1)
+if args.max_retry_delay < 1:
+    print("ERROR: --max-retry-delay must be at least 1")
     sys.exit(1)
 os.makedirs(args.output_dir, exist_ok=True)
 
@@ -221,6 +258,9 @@ run_started_at = time.monotonic()
 developers_per_repo     = []
 developers_across_repos = set()
 errors_log              = []
+data_lock               = threading.Lock()
+print_lock              = threading.Lock()
+thread_local            = threading.local()
 scan_stats              = {
     'projects_seen': 0,
     'projects_scanned': 0,
@@ -254,14 +294,9 @@ def verbose_print(details):
 def error_print(details, context=''):
     """ Error output """
     context = f"{context}: " if context else ""
-    try:
-        error_type = type(details).__name__
-        details = str(details).replace("\n", " ").replace("\r", " ")
-    except Exception:  # pylint: disable=broad-exception-caught
-        error_type = 'Error'
-    message = f"+{elapsed_time()} ERROR: {context}{error_type}: {details}"
-    print(f"\n{message}")
-    errors_log.append(message)
+    message = f"+{elapsed_time()} ERROR: {context}{format_exception(details)}"
+    console_print(f"\n{message}")
+    append_error(message)
     if args.fail_fast:
         raise RuntimeError(f"{context}{details}")
 
@@ -278,7 +313,104 @@ def elapsed_time():
 
 def status_print(message):
     """ Status output """
-    print(f"+{elapsed_time()} {message}")
+    with print_lock:
+        print(f"+{elapsed_time()} {message}")
+
+
+def console_print(message=''):
+    """ Thread-safe terminal output """
+    with print_lock:
+        print(message)
+
+
+def append_error(message):
+    """ Append an error safely across worker threads """
+    with data_lock:
+        errors_log.append(message)
+
+
+def append_repo_log(row):
+    """ Append a repository log row safely across worker threads """
+    with data_lock:
+        developers_per_repo.append(row)
+
+
+def add_developers(developers):
+    """ Add developers to the global set safely across worker threads """
+    with data_lock:
+        developers_across_repos.update(developers)
+
+
+def increment_stat(name, amount=1):
+    """ Increment a scan stat safely across worker threads """
+    with data_lock:
+        scan_stats[name] += amount
+
+
+def get_developer_count():
+    """ Return current unique developer count safely across worker threads """
+    with data_lock:
+        return len(developers_across_repos)
+
+
+def format_exception(details):
+    """ Return a compact exception description for terminal and log output """
+    if isinstance(details, str):
+        return details.replace("\n", " ").replace("\r", " ")
+    try:
+        error_type = type(details).__name__
+        detail_text = str(details).replace("\n", " ").replace("\r", " ")
+    except Exception:  # pylint: disable=broad-exception-caught
+        return "Error"
+    status_code = get_exception_status_code(details)
+    status_text = f" status={status_code}" if status_code else ""
+    return f"{error_type}{status_text}: {detail_text}"
+
+
+def get_exception_status_code(details):
+    """ Best-effort extraction of HTTP status code from Azure DevOps SDK errors """
+    for attr_name in ('status_code', 'status'):
+        status_code = getattr(details, attr_name, None)
+        if status_code:
+            return str(status_code)
+    response = getattr(details, 'response', None)
+    if response is not None:
+        status_code = getattr(response, 'status_code', None) or getattr(response, 'status', None)
+        if status_code:
+            return str(status_code)
+    return ''
+
+
+def is_retryable_ado_exception(details):
+    """ Return whether an Azure DevOps error is likely transient """
+    status_code = get_exception_status_code(details)
+    if status_code:
+        return status_code in {'408', '409', '429', '500', '502', '503', '504'}
+    detail_text = str(details).lower()
+    transient_patterns = [
+        'timeout',
+        'timed out',
+        'temporarily',
+        'too many requests',
+        'rate limit',
+        'connection reset',
+        'connection aborted',
+        'service unavailable',
+    ]
+    non_retryable_patterns = [
+        'unauthorized',
+        'forbidden',
+        'not found',
+        'does not exist',
+        'empty',
+        'no default branch',
+        'tf401019',
+        'tf401180',
+        'vs403403',
+    ]
+    if any(pattern in detail_text for pattern in non_retryable_patterns):
+        return False
+    return any(pattern in detail_text for pattern in transient_patterns)
 
 
 def output_path(file_name):
@@ -387,17 +519,24 @@ def get_ado_client():
     return result
 
 
-def call_ado_api(description, func, *func_args, **func_kwargs):
+def call_ado_api(description, func, *func_args, max_attempts=None, error_state=None, **func_kwargs):
     """ Call Azure DevOps with retry handling """
-    for attempt in range(1, args.max_retries + 1):
+    max_attempts = max_attempts or args.max_retries
+    for attempt in range(1, max_attempts + 1):
         try:
             return func(*func_args, **func_kwargs)
         except Exception as ex:  # pylint: disable=broad-exception-caught
-            if attempt >= args.max_retries:
-                error_print(ex, f"{description} failed after {attempt} attempt(s)")
+            error_summary = format_exception(ex)
+            if error_state is not None:
+                error_state['error'] = error_summary
+            if not is_retryable_ado_exception(ex):
+                error_print(ex, f"{description} failed with non-retryable error")
                 return None
-            sleep_seconds = args.retry_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
-            status_print(f"[WAIT] {description} failed on attempt {attempt}/{args.max_retries}. Retrying in {sleep_seconds:.1f}s.")
+            if attempt >= max_attempts:
+                error_print(ex, f"{description} failed after {attempt} retryable attempt(s)")
+                return None
+            sleep_seconds = min(args.max_retry_delay, args.retry_delay * (2 ** (attempt - 1))) + random.uniform(0, 1)
+            status_print(f"[WAIT] {description} failed on attempt {attempt}/{max_attempts}: {error_summary}. Retrying in {sleep_seconds:.1f}s.")
             time.sleep(sleep_seconds)
 
 
@@ -416,6 +555,13 @@ def get_git_client():
         error_print("Exiting...")
         sys.exit(1)
     return result
+
+
+def get_thread_git_client():
+    """ Get a per-thread Git client for concurrent repository scans """
+    if not hasattr(thread_local, 'git_client'):
+        thread_local.git_client = get_git_client()
+    return thread_local.git_client
 
 
 def get_projects(ado_client):
@@ -469,6 +615,8 @@ def iter_commits(git_client, project, repository, repository_scan_state):
                 git_client.get_commits,
                 repository.id,
                 criteria,
+                max_attempts=args.commit_max_retries,
+                error_state=repository_scan_state,
                 project=project.id,
                 skip=skip,
                 top=args.commit_page_size
@@ -481,14 +629,14 @@ def iter_commits(git_client, project, repository, repository_scan_state):
             for commit in commits:
                 if args.max_commits_per_repo and yielded >= args.max_commits_per_repo:
                     if not repository_scan_state['commit_cap_reached']:
-                        scan_stats['capped_repositories'] += 1
+                        increment_stat('capped_repositories')
                         repository_scan_state['commit_cap_reached'] = True
                     return
                 yielded += 1
                 yield commit
             if args.max_commits_per_repo and yielded >= args.max_commits_per_repo:
                 if not repository_scan_state['commit_cap_reached']:
-                    scan_stats['capped_repositories'] += 1
+                    increment_stat('capped_repositories')
                     repository_scan_state['commit_cap_reached'] = True
                 status_print(f"[WARN] Commit cap reached for {project.name}/{repository.name}: {args.max_commits_per_repo}")
                 break
@@ -504,11 +652,10 @@ def get_active_developers(git_client, project, repository):
     """ Get Active Developers of a Repository """
     repository_active_developers = {}
     commits_scanned = 0
-    repository_scan_state = {'commit_cap_reached': False, 'failed': False}
+    repository_scan_state = {'commit_cap_reached': False, 'failed': False, 'error': ''}
 
     for commit in iter_commits(git_client, project, repository, repository_scan_state):
         commits_scanned += 1
-        scan_stats['commits_scanned'] += 1
         verbose_print(f"Commit: {commit}")
 
         try:
@@ -529,27 +676,33 @@ def get_active_developers(git_client, project, repository):
                 'commits': 1
             }
 
-    for developer_email, developer in repository_active_developers.items():
-        print(f"        Found Developer: {developer['name']} ({mask_email(developer_email)}) with {developer['commits']} Commits")
+    if args.show_developers:
+        for developer_email, developer in repository_active_developers.items():
+            console_print(f"        Found Developer: {developer['name']} ({mask_email(developer_email)}) with {developer['commits']} Commits")
 
     if len(repository_active_developers) > 0:
-        print(f"        Total {len(repository_active_developers)} Developers in Project: {project.name} in Repository: {repository.name}")
-        developers_across_repos.update(repository_active_developers.keys())
+        console_print(f"        Total {len(repository_active_developers)} Developers in Project: {project.name} in Repository: {repository.name}")
+        add_developers(repository_active_developers.keys())
     if repository_scan_state['failed']:
         status = "failed"
-        scan_stats['repositories_failed'] += 1
+        increment_stat('repositories_failed')
     elif repository_scan_state['commit_cap_reached']:
         status = "commit_cap_reached"
     else:
         status = "scanned"
-    developers_per_repo.append([get_org_display_name(), project.name, repository.name, len(repository_active_developers), commits_scanned, status])
+    increment_stat('commits_scanned', commits_scanned)
+    append_repo_log([get_org_display_name(), project.name, repository.name, len(repository_active_developers), commits_scanned, status, repository_scan_state['error']])
     return repository_active_developers
 
 # pylint: disable=too-many-locals
 def output_results(projects, repositories, partial=False):
     """ Output Results """
+    with data_lock:
+        developers_across_repos_set = sorted(developers_across_repos)
+        developers_per_repo_snapshot = list(developers_per_repo)
+        errors_log_snapshot = list(errors_log)
+        scan_stats_snapshot = dict(scan_stats)
     # Developer File
-    developers_across_repos_set = sorted(developers_across_repos) # Deduplicate
     developer_file_name = f"azure_devops{slugify([get_org_display_name(), args.proj, args.repo])}-developers.txt"
     with open(output_path(developer_file_name), 'w', encoding='utf-8') as developer_file:
         for developer_email in developers_across_repos_set:
@@ -562,8 +715,8 @@ def output_results(projects, repositories, partial=False):
     developer_log_file_name = f"azure_devops{slugify([get_org_display_name(), args.proj, args.repo])}-developers-log.txt"
     with open(output_path(developer_log_file_name), 'w', encoding='utf-8') as csv_file:
         csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(['Organization', 'Project', 'Repository', f"Developers (Last {number_of_days} Days)", 'Commits Scanned', 'Status'])
-        for item in developers_per_repo:
+        csv_writer.writerow(['Organization', 'Project', 'Repository', f"Developers (Last {number_of_days} Days)", 'Commits Scanned', 'Status', 'Error'])
+        for item in developers_per_repo_snapshot:
             csv_writer.writerow(item)
 
     # Summary
@@ -573,15 +726,15 @@ def output_results(projects, repositories, partial=False):
     label = "Partial Results" if partial else "Results"
     print(f"\n{label} (Active Developers in the last {number_of_days} days)\n")
     print(f"- {len(developers_across_repos_set)} Developers{repository_details}{project_details}{organization_details}")
-    print(f"- {scan_stats['projects_scanned']} Projects scanned; {scan_stats['repositories_scanned']} Repositories scanned; {scan_stats['repositories_skipped']} Repositories skipped")
-    print(f"- {scan_stats['commits_scanned']} Commits scanned")
-    if scan_stats['capped_repositories']:
-        print(f"- {scan_stats['capped_repositories']} Repositories reached --max-commits-per-repo")
+    print(f"- {scan_stats_snapshot['projects_scanned']} Projects scanned; {scan_stats_snapshot['repositories_scanned']} Repositories scanned; {scan_stats_snapshot['repositories_skipped']} Repositories skipped")
+    print(f"- {scan_stats_snapshot['commits_scanned']} Commits scanned")
+    if scan_stats_snapshot['capped_repositories']:
+        print(f"- {scan_stats_snapshot['capped_repositories']} Repositories reached --max-commits-per-repo")
     output_results_across_version_control_systems()
-    if errors_log:
+    if errors_log_snapshot:
         error_log_file_name = f"azure_devops{slugify([get_org_display_name(), args.proj, args.repo])}-errors-log.txt"
         with open(output_path(error_log_file_name), 'w', encoding='utf-8') as error_file:
-            for error in errors_log:
+            for error in errors_log_snapshot:
                 error_file.write(f"{error}\n")
         print(f"\nErrors written to {error_log_file_name}")
     # Sanity check for only public repositories, or no repositories.
@@ -625,6 +778,36 @@ def repository_is_empty(repository):
     return False
 
 
+def print_pre_scan_summary(candidate_repositories):
+    """ Print rough scan size before commit-level scanning starts """
+    print()
+    print("Pre-scan summary")
+    print(f"- {scan_stats['projects_scanned']} matching Projects inspected")
+    print(f"- {scan_stats['repositories_seen']} Repositories found")
+    print(f"- {len(candidate_repositories)} Repositories queued for commit scanning")
+    print(f"- {scan_stats['repositories_skipped']} Repositories skipped before commit scanning")
+    print(f"- Parallelism: up to {args.max_workers} repositories at a time")
+    print(f"- Commit page size: up to {args.commit_page_size} commits per API call")
+    if args.max_commits_per_repo:
+        max_pages = (args.max_commits_per_repo + args.commit_page_size - 1) // args.commit_page_size
+        print(f"- Commit cap: up to {args.max_commits_per_repo} commits per repository, about {max_pages} page(s) per repository")
+    else:
+        print("- Commit depth: uncapped; large active repositories may require multiple commit pages")
+    print("- This is a scan-size estimate, not an active developer count.")
+    print()
+
+
+def scan_repository(project, repository):
+    """ Scan one repository for active developers """
+    try:
+        return get_active_developers(get_thread_git_client(), project, repository)
+    except Exception as ex:  # pylint: disable=broad-exception-caught
+        increment_stat('repositories_failed')
+        error_print(ex, f"Repository scan failed: {project.name}/{repository.name}")
+        append_repo_log([get_org_display_name(), project.name, repository.name, 0, 0, 'failed', format_exception(ex)])
+        return {}
+
+
 ####
 # Main
 ####
@@ -643,8 +826,11 @@ def main():
     projects = get_projects(ado_client)
     last_projects = projects
     repositories = []
-    repositories_scanned = 0
+    candidate_repositories = []
+    repository_cap_reached = False
     for project in projects:
+        if repository_cap_reached:
+            break
         verbose_print(f"Project: {project}")
         scan_stats['projects_seen'] += 1
         if not project_matches(project):
@@ -665,33 +851,81 @@ def main():
             if getattr(repository, 'is_disabled', False) and not args.include_disabled:
                 print(f"        Skipping disabled repository: {repository.name}")
                 scan_stats['repositories_skipped'] += 1
-                developers_per_repo.append([get_org_display_name(), project.name, repository.name, 0, 0, 'skipped_disabled'])
+                append_repo_log([get_org_display_name(), project.name, repository.name, 0, 0, 'skipped_disabled', ''])
                 continue
             if repository_is_empty(repository):
                 print(f"        Skipping empty repository: {repository.name}")
                 scan_stats['repositories_skipped'] += 1
-                developers_per_repo.append([get_org_display_name(), project.name, repository.name, 0, 0, 'skipped_empty'])
+                append_repo_log([get_org_display_name(), project.name, repository.name, 0, 0, 'skipped_empty', ''])
                 continue
-            if args.max_repositories and repositories_scanned >= args.max_repositories:
+            if args.max_repositories and len(candidate_repositories) >= args.max_repositories:
                 status_print(f"[WARN] Repository cap reached: {args.max_repositories}")
-                output_results(projects, repositories, partial=True)
-                return
-            if should_stop_for_runtime():
+                repository_cap_reached = True
+                break
+            candidate_repositories.append((project, repository))
+
+    print_pre_scan_summary(candidate_repositories)
+    if not candidate_repositories:
+        output_results(projects, repositories)
+        return
+
+    completed_count = 0
+    next_repository_index = 0
+    futures = {}
+
+    def submit_next(executor):
+        nonlocal next_repository_index
+        if next_repository_index >= len(candidate_repositories):
+            return False
+        if should_stop_for_runtime():
+            return False
+        project, repository = candidate_repositories[next_repository_index]
+        next_repository_index += 1
+        increment_stat('repositories_scanned')
+        future = executor.submit(scan_repository, project, repository)
+        futures[future] = (project, repository)
+        return True
+
+    status_print(f"[SCAN] Starting commit scan for {len(candidate_repositories)} repositories")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        while len(futures) < args.max_workers and submit_next(executor):
+            pass
+        while futures:
+            done, _not_done = concurrent.futures.wait(
+                futures,
+                timeout=1,
+                return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            if not done:
+                if should_stop_for_runtime():
+                    status_print(f"[WARN] Runtime cap reached: {args.max_run_minutes} minute(s). Cancelling queued work.")
+                    for future in futures:
+                        future.cancel()
+                    output_results(projects, repositories, partial=True)
+                    return
+                continue
+            for future in done:
+                project, repository = futures.pop(future)
+                completed_count += 1
+                if future.cancelled():
+                    append_repo_log([get_org_display_name(), project.name, repository.name, 0, 0, 'cancelled', 'Runtime cap reached'])
+                    continue
+                try:
+                    future.result()
+                except Exception as ex:  # pylint: disable=broad-exception-caught
+                    increment_stat('repositories_failed')
+                    error_print(ex, f"Repository scan failed: {project.name}/{repository.name}")
+                    append_repo_log([get_org_display_name(), project.name, repository.name, 0, 0, 'failed', format_exception(ex)])
+                if completed_count == 1 or completed_count % args.progress_interval == 0 or completed_count == len(candidate_repositories):
+                    status_print(f"[SCAN] {completed_count}/{len(candidate_repositories)} repositories completed; {get_developer_count()} unique developers found so far.")
+                if args.checkpoint_interval and completed_count % args.checkpoint_interval == 0:
+                    output_results(projects, repositories, partial=True)
+            while len(futures) < args.max_workers and submit_next(executor):
+                pass
+            if should_stop_for_runtime() and not futures:
                 status_print(f"[WARN] Runtime cap reached: {args.max_run_minutes} minute(s).")
                 output_results(projects, repositories, partial=True)
                 return
-            repositories_scanned += 1
-            scan_stats['repositories_scanned'] += 1
-            if repositories_scanned == 1 or repositories_scanned % args.progress_interval == 0:
-                status_print(f"[SCAN] {repositories_scanned} repositories scanned; {len(developers_across_repos)} unique developers found so far.")
-            try:
-                get_active_developers(git_client, project, repository)
-            except Exception as ex:  # pylint: disable=broad-exception-caught
-                scan_stats['repositories_failed'] += 1
-                error_print(ex, f"Repository scan failed: {project.name}/{repository.name}")
-                developers_per_repo.append([get_org_display_name(), project.name, repository.name, 0, 0, 'failed'])
-            if args.checkpoint_interval and repositories_scanned % args.checkpoint_interval == 0:
-                output_results(projects, repositories, partial=True)
     output_results(projects, repositories)
 
 

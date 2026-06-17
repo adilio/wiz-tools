@@ -304,8 +304,9 @@ python3 active-developer-count-github.py --token ${GITHUB_TOKEN}</code></pre>
           <tbody>
             <tr><td>Repository loop</td><td>Accumulated repositories across projects and rescanned the full list each project</td><td>Scans only the repositories for the current project</td><td>Prevents repeated rescans that made large orgs appear to run indefinitely</td></tr>
             <tr><td>Pagination</td><td>No operator-visible paging controls</td><td>Adds <code>--project-page-size</code> and <code>--commit-page-size</code></td><td>Improves large-org behavior and makes API work visible</td></tr>
+            <tr><td>Performance</td><td>Scanned repositories sequentially and printed every developer discovery</td><td>Adds a pre-scan summary, concurrent repository scans with <code>--max-workers</code>, and quiet developer output by default</td><td>Reduces Cloud Shell wait time and terminal output overhead while preserving final count files</td></tr>
             <tr><td>Guardrails</td><td>No cap for repositories, commits, or runtime</td><td>Adds <code>--max-repositories</code>, <code>--max-commits-per-repo</code>, <code>--max-run-minutes</code></td><td>Allows safe pilots before committing to a full org scan</td></tr>
-            <tr><td>API reliability</td><td>Errors logged or skipped without retry/backoff</td><td>Adds <code>--max-retries</code>, <code>--retry-delay</code>, detailed error context, and <code>--fail-fast</code></td><td>Handles transient failures while preserving a strict troubleshooting mode</td></tr>
+            <tr><td>API reliability</td><td>Errors logged or skipped without retry/backoff</td><td>Adds <code>--max-retries</code>, <code>--commit-max-retries</code>, capped retry delay, detailed error context, and <code>--fail-fast</code></td><td>Retries transient failures without letting one problematic repository slow the whole scan</td></tr>
           </tbody>
         </table>
 
