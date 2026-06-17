@@ -188,7 +188,9 @@ footer a:hover{color:var(--accent);}
             <tr><td>Cleanup</td><td>Cleanup ran only after a successful scan path</td><td>Cleanup runs from a <code>finally</code> block</td><td>Ensures the temporary app is removed even if scanning fails midway</td></tr>
             <tr><td>Authentication UX</td><td>Used normal <code>Connect-MgGraph</code> sign-in</td><td>Uses device-code auth by default</td><td>Device-code auth is more reliable in Azure Cloud Shell</td></tr>
             <tr><td>Access token lifetime</td><td>Requested one app-only access token before scanning</td><td>Tracks token expiry and reacquires a new app-only token before expiry</td><td>Large tenants can scan for more than an hour; this prevents failures from expired access tokens</td></tr>
-            <tr><td>Graph retries</td><td>Retried throttling and API errors, then silently stopped after max retries</td><td>Retries throttling and transient errors, then throws a clear failure after max retries</td><td>Prevents partial counts from looking like successful final results</td></tr>
+            <tr><td>User count</td><td>Could include users without assigned licenses while excluding Microsoft 365 F1</td><td>Counts users with assigned licenses, still excluding Microsoft 365 F1</td><td>Better matches the Microsoft 365 billable-user sizing intent</td></tr>
+            <tr><td>Graph retries</td><td>Retried throttling and API errors, then silently stopped after max retries</td><td>Retries throttling and transient errors with a capped wait, then throws a clear failure after max retries</td><td>Prevents partial counts from looking like successful final results and avoids excessive wait times</td></tr>
+            <tr><td>Site drive failures</td><td>A failed site drive request could stop the full tenant scan</td><td>Logs the site, URI, status/error context, continues remaining sites, and warns if drive counts are partial</td><td>One problematic SharePoint site should not block the rest of the tenant inventory</td></tr>
             <tr><td>Progress output</td><td>Minimal terminal output</td><td>Adds clean section headers, elapsed time, <code>Write-Progress</code>, and periodic status lines</td><td>Gives users confidence during long Cloud Shell runs</td></tr>
             <tr><td>Performance</td><td>Used PowerShell array appends with <code>+=</code> inside loops</td><td>Uses generic collections and hash sets</td><td>Avoids slow array copying in larger tenants</td></tr>
             <tr><td>Drive scan payload</td><td>Requested default drive fields</td><td>Uses <code>$select</code> for only needed drive fields</td><td>Reduces Microsoft Graph response size</td></tr>
@@ -205,6 +207,7 @@ footer a:hover{color:var(--accent);}
             <tr><td><code>-AppName</code></td><td>Unique generated name</td><td>Temporary Entra ID app display name</td></tr>
             <tr><td><code>-KeepTemporaryApp</code></td><td><code>false</code></td><td>Keep the temporary app after the scan for troubleshooting</td></tr>
             <tr><td><code>-MaxRetries</code></td><td><code>5</code></td><td>Retry attempts for Microsoft Graph calls</td></tr>
+            <tr><td><code>-MaxRetryDelaySeconds</code></td><td><code>120</code></td><td>Maximum wait between Microsoft Graph retries</td></tr>
             <tr><td><code>-PermissionPropagationSeconds</code></td><td><code>20</code></td><td>Wait time after admin consent</td></tr>
             <tr><td><code>-ProgressInterval</code></td><td><code>25</code></td><td>Number of sites between progress log lines</td></tr>
             <tr><td><code>-UseDeviceCode</code></td><td><code>true</code></td><td>Use device-code auth for Cloud Shell-friendly sign-in</td></tr>
@@ -215,6 +218,9 @@ footer a:hover{color:var(--accent);}
 
 # Reduce progress output for very large tenants
 ./365_Sizing_Script.ps1 -ProgressInterval 100
+
+# Lower retry wait ceiling during troubleshooting
+./365_Sizing_Script.ps1 -MaxRetryDelaySeconds 30
 
 # Keep the temporary app if troubleshooting consent or permissions
 ./365_Sizing_Script.ps1 -KeepTemporaryApp

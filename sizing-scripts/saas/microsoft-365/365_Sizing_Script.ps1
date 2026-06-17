@@ -4,7 +4,8 @@
 # Local status: modified from the Wiz-hosted Microsoft 365 sizing script.
 # Origin: http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1
 # Local changes: unique temporary app names, cleanup in finally, token refresh,
-# retry handling, progress output, and Cloud Shell-friendly authentication.
+# retry handling, progress output, per-site failure handling, and Cloud
+# Shell-friendly authentication.
 
 [CmdletBinding()]
 param(
@@ -14,6 +15,9 @@ param(
 
     [ValidateRange(1, 10)]
     [int]$MaxRetries = 5,
+
+    [ValidateRange(1, 3600)]
+    [int]$MaxRetryDelaySeconds = 120,
 
     [ValidateRange(1, 300)]
     [int]$PermissionPropagationSeconds = 20,
@@ -175,25 +179,63 @@ function Get-RetryAfterDelay {
     [CmdletBinding()]
     [OutputType([int])]
     param(
-        $Response
+        $Response,
+
+        [ValidateRange(1, 3600)]
+        [int]$MaxDelaySeconds = 120
     )
 
     $retryAfterValues = $null
     if (-not $Response -or -not $Response.Headers.TryGetValues("Retry-After", [ref]$retryAfterValues)) {
-        return 10
+        return [Math]::Min(10, $MaxDelaySeconds)
     }
 
     $retryAfterValue = @($retryAfterValues)[0]
     if ($retryAfterValue -as [int]) {
-        return [int]$retryAfterValue
+        return [Math]::Min([int]$retryAfterValue, $MaxDelaySeconds)
     }
 
     $retryAfterDate = $retryAfterValue -as [datetime]
     if ($retryAfterDate) {
-        return [Math]::Max(1, [int]($retryAfterDate.ToUniversalTime() - [datetime]::UtcNow).TotalSeconds)
+        $delaySeconds = [Math]::Max(1, [int]($retryAfterDate.ToUniversalTime() - [datetime]::UtcNow).TotalSeconds)
+        return [Math]::Min($delaySeconds, $MaxDelaySeconds)
     }
 
-    return 10
+    return [Math]::Min(10, $MaxDelaySeconds)
+}
+
+function Get-GraphErrorStatusCode {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    )
+
+    if ($ErrorRecord.Exception.Response -and $ErrorRecord.Exception.Response.StatusCode) {
+        return [string][int]$ErrorRecord.Exception.Response.StatusCode
+    }
+
+    return "No HTTP response"
+}
+
+function Format-GraphRequestError {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+
+        [Parameter(Mandatory)]
+        [string]$Uri,
+
+        [Parameter(Mandatory)]
+        [string]$Activity
+    )
+
+    $statusCode = Get-GraphErrorStatusCode -ErrorRecord $ErrorRecord
+    $errorMessage = $ErrorRecord.Exception.Message -replace "`r", " " -replace "`n", " "
+    return "Activity: $Activity. Status: $statusCode. Uri: $Uri. Error: $errorMessage"
 }
 
 function Invoke-GraphCollectionRequest {
@@ -215,6 +257,9 @@ function Invoke-GraphCollectionRequest {
 
         [ValidateRange(1, 100000)]
         [int]$ProgressInterval = 500,
+
+        [ValidateRange(1, 3600)]
+        [int]$MaxRetryDelaySeconds = 120,
 
         [int[]]$NonFatalStatusCodes = @(404)
     )
@@ -266,25 +311,28 @@ function Invoke-GraphCollectionRequest {
                 }
 
                 if ($statusCode -in $NonFatalStatusCodes) {
+                    $errorDetails = Format-GraphRequestError -ErrorRecord $_ -Uri $nextLink -Activity $Activity
                     if ($statusCode -ne 404) {
-                        Write-Warning "$Activity skipped because Microsoft Graph returned status $statusCode. Continuing scan."
+                        Write-Warning "$Activity skipped because Microsoft Graph returned status $statusCode. Continuing scan. $errorDetails"
                     }
                     return , $results
                 }
 
                 if ($attempt -ge $MaxRetries) {
-                    throw "Graph request failed after $attempt attempts. Status: $($statusCode ?? 'No HTTP response'). Uri: $nextLink. Error: $($_.Exception.Message)"
+                    $errorDetails = Format-GraphRequestError -ErrorRecord $_ -Uri $nextLink -Activity $Activity
+                    throw "Graph request failed after $attempt attempts. $errorDetails"
                 }
 
                 if ($statusCode -in 429, 503) {
-                    $sleepSeconds = Get-RetryAfterDelay -Response $_.Exception.Response
-                    Write-Status -Level "WAIT" -Message "Graph throttled or unavailable. Retrying in $sleepSeconds seconds."
+                    $sleepSeconds = Get-RetryAfterDelay -Response $_.Exception.Response -MaxDelaySeconds $MaxRetryDelaySeconds
+                    Write-Status -Level "WAIT" -Message "Graph throttled or unavailable during '$Activity'. Retrying in $sleepSeconds seconds."
                     Start-Sleep -Seconds $sleepSeconds
                     continue
                 }
 
-                Write-Status -Level "WAIT" -Message "Graph API error ($($statusCode ?? 'No HTTP response')). Retrying in 5 seconds."
-                Start-Sleep -Seconds 5
+                $sleepSeconds = [Math]::Min(5, $MaxRetryDelaySeconds)
+                Write-Status -Level "WAIT" -Message "Graph API error ($($statusCode ?? 'No HTTP response')) during '$Activity'. Retrying in $sleepSeconds seconds."
+                Start-Sleep -Seconds $sleepSeconds
             }
         }
     }
@@ -330,6 +378,7 @@ $appClientId = $null
 $appSecret = $null
 $licensedUserCount = $null
 $processedDriveIds = [System.Collections.Generic.HashSet[string]]::new()
+$failedSiteScans = [System.Collections.Generic.List[object]]::new()
 $siteCount = $null
 $siteIndex = 0
 $scanCompleted = $false
@@ -400,19 +449,20 @@ try {
     Write-Status -Level "SCAN" -Message "Collecting users, sites, and unique drives."
 
     $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
-    $allUsers = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/users?`$select=id,assignedLicenses&`$top=999" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching users" -ProgressInterval 1000
+    $allUsers = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/users?`$select=id,assignedLicenses&`$top=999" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -MaxRetryDelaySeconds $MaxRetryDelaySeconds -Activity "Fetching users" -ProgressInterval 1000
 
     $m365F1SkuId = "44575883-256e-4a79-9da4-ebe9acabe2b2"
     $licensedUserCount = 0
     foreach ($user in $allUsers) {
-        if ($user.assignedLicenses.skuId -notcontains $m365F1SkuId) {
+        $assignedSkuIds = @($user.assignedLicenses | ForEach-Object { [string]$_.skuId })
+        if ($assignedSkuIds.Count -gt 0 -and $assignedSkuIds -notcontains $m365F1SkuId) {
             $licensedUserCount++
         }
     }
     Write-Status -Level "OK" -Message "$licensedUserCount users counted after excluding Microsoft 365 F1."
 
     $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
-    $allSites = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$select=id" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching sites" -ProgressInterval 500
+    $allSites = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$select=id" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -MaxRetryDelaySeconds $MaxRetryDelaySeconds -Activity "Fetching sites" -ProgressInterval 500
     Write-Status -Level "OK" -Message "$($allSites.Count) sites found. Scanning drives next."
 
     $siteCount = $allSites.Count
@@ -428,7 +478,21 @@ try {
         $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
         $encodedSiteId = [uri]::EscapeDataString($site.id)
         $drivesUri = "https://graph.microsoft.com/v1.0/sites/$encodedSiteId/drives?`$select=id,name"
-        $drives = Invoke-GraphCollectionRequest -Uri $drivesUri -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -Activity "Fetching drives for site $siteIndex of $siteCount" -ProgressInterval 100 -NonFatalStatusCodes @(404, 423)
+
+        try {
+            $drives = Invoke-GraphCollectionRequest -Uri $drivesUri -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -MaxRetryDelaySeconds $MaxRetryDelaySeconds -Activity "Fetching drives for site $siteIndex of $siteCount" -ProgressInterval 100 -NonFatalStatusCodes @(404, 423)
+        }
+        catch {
+            $errorMessage = $_.Exception.Message -replace "`r", " " -replace "`n", " "
+            $failedSiteScans.Add([PSCustomObject]@{
+                SiteIndex = $siteIndex
+                SiteId    = $site.id
+                Uri       = $drivesUri
+                Error     = $errorMessage
+            }) | Out-Null
+            Write-Warning "Drive scan failed for site $siteIndex of $siteCount. SiteId: $($site.id). Continuing with remaining sites. Error: $errorMessage"
+            $drives = @()
+        }
 
         foreach ($drive in $drives) {
             if ($excludedDriveNames.Contains($drive.name)) {
@@ -447,7 +511,16 @@ try {
     Write-Information "===================================" -InformationAction Continue
     Write-Information " Total Users Found : $licensedUserCount" -InformationAction Continue
     Write-Information " Total Drives Found: $($processedDriveIds.Count)" -InformationAction Continue
+    if ($failedSiteScans.Count -gt 0) {
+        Write-Information " Sites With Drive Errors: $($failedSiteScans.Count)" -InformationAction Continue
+    }
     Write-Information "===================================" -InformationAction Continue
+    if ($failedSiteScans.Count -gt 0) {
+        Write-Warning "The drive count may be partial because $($failedSiteScans.Count) site drive scan(s) failed after retries."
+        foreach ($failedSiteScan in $failedSiteScans) {
+            Write-Warning "Failed site $($failedSiteScan.SiteIndex) / $siteCount. SiteId: $($failedSiteScan.SiteId). Error: $($failedSiteScan.Error)"
+        }
+    }
     $scanCompleted = $true
 }
 catch {
@@ -464,6 +537,7 @@ catch {
         }
 
         Write-Information " Total Drives Found So Far: $($processedDriveIds.Count)" -InformationAction Continue
+        Write-Information " Sites With Drive Errors  : $($failedSiteScans.Count)" -InformationAction Continue
 
         if ($null -ne $siteCount) {
             Write-Information " Sites Processed So Far  : $siteIndex / $siteCount" -InformationAction Continue
