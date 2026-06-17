@@ -4,8 +4,8 @@
 # Local status: modified from the Wiz-hosted Microsoft 365 sizing script.
 # Origin: http://downloads.wiz.io/customer-files/scripts/M365/365_Sizing_Script.ps1
 # Local changes: unique temporary app names, cleanup in finally, token refresh,
-# retry handling, progress output, per-site failure handling, and Cloud
-# Shell-friendly authentication.
+# retry handling, upfront scan summary, progress output, per-site failure
+# handling, and Cloud Shell-friendly authentication.
 
 [CmdletBinding()]
 param(
@@ -24,6 +24,11 @@ param(
 
     [ValidateRange(1, 1000)]
     [int]$ProgressInterval = 25,
+
+    [ValidateRange(0, 1000000)]
+    [int]$MaxSites = 0,
+
+    [switch]$SummaryOnly,
 
     [bool]$UseDeviceCode = $true
 )
@@ -372,6 +377,48 @@ function Write-SiteScanProgress {
     return $LastUpdate
 }
 
+function Write-PreScanSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [int]$LicensedUserCount,
+
+        [Parameter(Mandatory)]
+        [int]$TotalSiteCount,
+
+        [Parameter(Mandatory)]
+        [int]$QueuedSiteCount,
+
+        [Parameter(Mandatory)]
+        [int]$MaxSites,
+
+        [Parameter(Mandatory)]
+        [bool]$SummaryOnly,
+
+        [Parameter(Mandatory)]
+        [int]$MaxRetries,
+
+        [Parameter(Mandatory)]
+        [int]$MaxRetryDelaySeconds
+    )
+
+    Write-Section "Pre-Scan Summary"
+    Write-Information "- Licensed users counted: $LicensedUserCount" -InformationAction Continue
+    Write-Information "- SharePoint sites discovered: $TotalSiteCount" -InformationAction Continue
+    Write-Information "- Sites queued for drive scan: $QueuedSiteCount" -InformationAction Continue
+    if ($MaxSites -gt 0) {
+        Write-Information "- Site cap: first $MaxSites site(s)" -InformationAction Continue
+    }
+    Write-Information "- Drive scan retries: up to $MaxRetries attempt(s), max $MaxRetryDelaySeconds second wait" -InformationAction Continue
+    Write-Information "- Excluded drive names: PersonalCacheLibrary, Preservation Hold Library" -InformationAction Continue
+    if ($SummaryOnly) {
+        Write-Information "- Mode: summary only; drive enumeration will not run" -InformationAction Continue
+    }
+    else {
+        Write-Information "- This is an initial scope summary. The drive count is calculated during the next step." -InformationAction Continue
+    }
+}
+
 $redirectUri = "https://admin.microsoft.com"
 $appObjectId = $null
 $appClientId = $null
@@ -463,13 +510,36 @@ try {
 
     $tokenData = Get-ValidToken -TokenData $tokenData -TenantId $appTenantId -ClientId $appClientId -ClientSecret $appSecret
     $allSites = Invoke-GraphCollectionRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$select=id" -AccessToken $tokenData.AccessToken -MaxRetries $MaxRetries -MaxRetryDelaySeconds $MaxRetryDelaySeconds -Activity "Fetching sites" -ProgressInterval 500
-    Write-Status -Level "OK" -Message "$($allSites.Count) sites found. Scanning drives next."
+    Write-Status -Level "OK" -Message "$($allSites.Count) sites found."
 
-    $siteCount = $allSites.Count
+    $sitesToScan = if ($MaxSites -gt 0) {
+        @($allSites | Select-Object -First $MaxSites)
+    }
+    else {
+        @($allSites)
+    }
+
+    $siteCount = $sitesToScan.Count
+    Write-PreScanSummary -LicensedUserCount $licensedUserCount -TotalSiteCount $allSites.Count -QueuedSiteCount $siteCount -MaxSites $MaxSites -SummaryOnly:$SummaryOnly -MaxRetries $MaxRetries -MaxRetryDelaySeconds $MaxRetryDelaySeconds
+
+    if ($SummaryOnly) {
+        Write-Information "`n===================================" -InformationAction Continue
+        Write-Information "          INITIAL COUNTS           " -InformationAction Continue
+        Write-Information "===================================" -InformationAction Continue
+        Write-Information " Total Users Found : $licensedUserCount" -InformationAction Continue
+        Write-Information " Sites Found       : $($allSites.Count)" -InformationAction Continue
+        Write-Information " Sites Queued      : $siteCount" -InformationAction Continue
+        Write-Information " Drive Scan        : Not run (-SummaryOnly)" -InformationAction Continue
+        Write-Information "===================================" -InformationAction Continue
+        $scanCompleted = $true
+        return
+    }
+
+    Write-Status -Level "SCAN" -Message "Scanning drives across $siteCount site(s)."
     $lastSiteProgressUpdate = [datetime]::UtcNow
     $excludedDriveNames = [System.Collections.Generic.HashSet[string]]::new([string[]]@("PersonalCacheLibrary", "Preservation Hold Library"))
 
-    foreach ($site in $allSites) {
+    foreach ($site in $sitesToScan) {
         if (-not $site.id) {
             continue
         }
